@@ -1,84 +1,97 @@
+import { supabase } from './supabase'
 import type { Customer, CustomerAddress } from '@/types'
 
-const DB_KEY = 'hagla_customers_v1'
-
-function load(): Record<string, Customer> {
-    if (typeof window === 'undefined') return {}
-    try {
-        return JSON.parse(localStorage.getItem(DB_KEY) || '{}')
-    } catch { return {} }
-}
-
-function save(db: Record<string, Customer>) {
-    localStorage.setItem(DB_KEY, JSON.stringify(db))
-}
-
 /** Get all customers as array */
-export function getAllCustomers(): Customer[] {
-    return Object.values(load())
+export async function getAllCustomers(): Promise<Customer[]> {
+    const { data: cData, error: cErr } = await supabase.from('customers').select('*')
+    if (cErr) { console.error(cErr); return [] }
+
+    const { data: aData, error: aErr } = await supabase.from('customer_addresses').select('*')
+    if (aErr) { console.error(aErr); return [] }
+
+    return cData.map(c => ({
+        ...c,
+        addresses: aData.filter(a => a.customer_code === c.code)
+    }))
 }
 
 /** Lookup a single customer by code */
-export function getCustomer(code: string): Customer | null {
-    return load()[code] ?? null
+export async function getCustomer(code: string): Promise<Customer | null> {
+    const strCode = String(code)
+    const { data: c, error: cErr } = await supabase.from('customers').select('*').eq('code', strCode).maybeSingle()
+    if (cErr || !c) return null
+
+    const { data: a, error: aErr } = await supabase.from('customer_addresses').select('*').eq('customer_code', strCode)
+    return { ...c, addresses: a || [] }
 }
 
-/** Normalise string for name matching */
-function norm(s: string) {
-    return s.trim().toLowerCase().replace(/\s+/g, ' ')
-}
+function norm(s: string) { return s.trim().toLowerCase().replace(/\s+/g, ' ') }
 
-/**
- * Find a customer by code (exact) OR by name (normalised).
- * Returns { customer, matchedBy } so callers know how it matched.
- */
-export function findCustomer(
+export async function findCustomer(
     code: string,
     name: string
-): { customer: Customer; matchedBy: 'code' | 'name' } | null {
-    const db = load()
-    // 1️⃣ Exact code match
-    if (db[code]) return { customer: db[code], matchedBy: 'code' }
-    // 2️⃣ Name match (normalised)
+): Promise<{ customer: Customer; matchedBy: 'code' | 'name' } | null> {
+    const all = await getAllCustomers()
+
     const normName = norm(name)
-    const byName = Object.values(db).find(c => norm(c.name) === normName)
+    const byName = all.find(c => norm(c.name) === normName)
     if (byName) return { customer: byName, matchedBy: 'name' }
+
+    const exact = all.find(c => String(c.code) === String(code))
+    if (exact) return { customer: exact, matchedBy: 'code' }
+    
     return null
 }
 
-/** Upsert a customer (create or overwrite) */
-export function upsertCustomer(customer: Customer) {
-    const db = load()
-    db[customer.code] = customer
-    save(db)
+export async function upsertCustomer(customer: Customer, oldCode?: string) {
+    if (oldCode && oldCode !== customer.code) {
+        await supabase.from('customers').delete().eq('code', oldCode)
+    }
+
+    await supabase.from('customers').upsert({
+        code: customer.code,
+        name: customer.name,
+        time_from: customer.time_from || null,
+        time_to: customer.time_to || null,
+        notes: customer.notes || null
+    })
+    
+    // Ensure precise sync by clear-and-replace for the addresses
+    await supabase.from('customer_addresses').delete().eq('customer_code', customer.code)
+
+    if (customer.addresses.length > 0) {
+        await supabase.from('customer_addresses').insert(
+            customer.addresses.map(a => ({
+                id: a.id,
+                customer_code: customer.code,
+                label: a.label,
+                address_text: a.address_text,
+                lat: a.lat,
+                lng: a.lng
+            }))
+        )
+    }
 }
 
-/** Add/replace an address on a customer */
-export function upsertAddress(code: string, addr: CustomerAddress) {
-    const db = load()
-    if (!db[code]) return
-    const idx = db[code].addresses.findIndex(a => a.id === addr.id)
-    if (idx >= 0) db[code].addresses[idx] = addr
-    else db[code].addresses.push(addr)
-    save(db)
+export async function upsertAddress(code: string, addr: CustomerAddress) {
+    await supabase.from('customer_addresses').upsert({
+        id: addr.id,
+        customer_code: code,
+        label: addr.label,
+        address_text: addr.address_text,
+        lat: addr.lat,
+        lng: addr.lng
+    })
 }
 
-/** Remove an address from a customer */
-export function removeAddress(code: string, addrId: string) {
-    const db = load()
-    if (!db[code]) return
-    db[code].addresses = db[code].addresses.filter(a => a.id !== addrId)
-    save(db)
+export async function removeAddress(code: string, addrId: string) {
+    await supabase.from('customer_addresses').delete().eq('id', addrId)
 }
 
-/** Delete a customer entirely */
-export function deleteCustomer(code: string) {
-    const db = load()
-    delete db[code]
-    save(db)
+export async function deleteCustomer(code: string) {
+    await supabase.from('customers').delete().eq('code', code)
 }
 
-/** Generate a new unique address ID */
 export function newAddrId(): string {
     return `addr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 }

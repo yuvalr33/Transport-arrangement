@@ -1,80 +1,84 @@
-/**
- * pickupDb.ts — permanent pickup records with completion history.
- * Stored in localStorage, never expires.
- */
+import { supabase } from './supabase'
 import type { PickupRecord, PickupCompletion } from '@/types'
 
-const KEY = 'hagla_pickups_v1'
+function todayStr(): string { return new Date().toISOString().slice(0, 10) }
 
-function todayStr(): string {
-    return new Date().toISOString().slice(0, 10)
+export async function getAllPickupRecords(): Promise<PickupRecord[]> {
+    const { data: pData, error: pErr } = await supabase.from('pickups').select('*')
+    if (pErr) { console.error(pErr); return [] }
+
+    const { data: cData, error: cErr } = await supabase.from('pickup_completions').select('*').order('date', { ascending: false })
+    if (cErr) { console.error(cErr); return [] }
+
+    return pData.map(p => ({
+        ...p,
+        completions: cData.filter(c => c.pickup_id === p.id).map(c => ({
+            date: c.date,
+            done: c.done,
+            note: c.note || undefined
+        }))
+    }))
 }
 
-type Db = Record<string, PickupRecord>
+export async function getPickupRecord(id: string): Promise<PickupRecord | null> {
+    const { data: p, error: pErr } = await supabase.from('pickups').select('*').eq('id', id).maybeSingle()
+    if (pErr || !p) return null
 
-function load(): Db {
-    if (typeof window === 'undefined') return {}
-    try {
-        const raw = localStorage.getItem(KEY)
-        return raw ? JSON.parse(raw) : {}
-    } catch {
-        return {}
+    const { data: cData } = await supabase.from('pickup_completions').select('*').eq('pickup_id', id).order('date', { ascending: false })
+    
+    return {
+        ...p,
+        completions: (cData || []).map(c => ({ date: c.date, done: c.done, note: c.note || undefined }))
     }
 }
 
-function save(db: Db) {
-    localStorage.setItem(KEY, JSON.stringify(db))
+export async function upsertPickupRecord(record: PickupRecord) {
+    await supabase.from('pickups').upsert({
+        id: record.id,
+        name: record.name,
+        address_text: record.address_text,
+        lat: record.lat,
+        lng: record.lng,
+        what_to_collect: record.what_to_collect,
+        phone: record.phone || null,
+        notes: record.notes || null,
+    })
+    
+    // We don't overwrite completions here, completions are added separately
 }
 
-// ─── CRUD ──────────────────────────────────────────────────────────────────────
-
-export function getAllPickupRecords(): PickupRecord[] {
-    return Object.values(load())
-}
-
-export function getPickupRecord(id: string): PickupRecord | null {
-    return load()[id] ?? null
-}
-
-export function upsertPickupRecord(record: PickupRecord) {
-    const db = load()
-    db[record.id] = record
-    save(db)
-}
-
-export function deletePickupRecord(id: string) {
-    const db = load()
-    delete db[id]
-    save(db)
+export async function deletePickupRecord(id: string) {
+    await supabase.from('pickups').delete().eq('id', id)
 }
 
 export function newPickupRecordId(): string {
     return `pr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
 }
 
-// ─── Completion tracking ───────────────────────────────────────────────────────
-
-/** Mark a pickup as done (or not done) for today. Replaces today's entry if exists. */
-export function markPickupDone(id: string, done: boolean, note?: string) {
-    const db = load()
-    const record = db[id]
-    if (!record) return
+export async function markPickupDone(id: string, done: boolean, note?: string) {
     const today = todayStr()
-    // Remove any existing entry for today
-    record.completions = record.completions.filter(c => c.date !== today)
-    // Add new one
-    const completion: PickupCompletion = { date: today, done, note }
-    record.completions.unshift(completion)  // newest first
-    save(db)
+    
+    // Check if exists
+    const { data: existing } = await supabase.from('pickup_completions')
+        .select('id').eq('pickup_id', id).eq('date', today).maybeSingle()
+
+    if (existing) {
+        await supabase.from('pickup_completions').update({ done, note: note || null }).eq('id', existing.id)
+    } else {
+        await supabase.from('pickup_completions').insert({
+            pickup_id: id,
+            date: today,
+            done,
+            note: note || null
+        })
+    }
 }
 
-/** Get today's completion status for a pickup */
 export function getTodayCompletion(record: PickupRecord): PickupCompletion | null {
     const today = todayStr()
     return record.completions.find(c => c.date === today) ?? null
 }
 
-/** Get completions for a specific record, optionally limited */
 export function getRecentCompletions(record: PickupRecord, limit = 10): PickupCompletion[] {
     return record.completions.slice(0, limit)
 }

@@ -612,8 +612,8 @@ export function MainView() {
   const handleSubmitStops = useCallback(async (stops: any[], trucks: number) => {
     setLoading(true); setError('')
     try {
-      const pickups = getAllPickupRecords()
-      const selectedPickupIds = getSelectedPickupIdsArray()
+      const pickups = await getAllPickupRecords()
+      const selectedPickupIds = await getSelectedPickupIdsArray()
       const r = await fetch('/api/routes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

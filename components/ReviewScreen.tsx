@@ -16,14 +16,13 @@ interface ParsedRow {
     time_from: string; time_to: string; notes: string; address: string
 }
 
-function buildEntries(rows: ParsedRow[]): ReviewEntry[] {
-    const overrides = getAddressOverrides()
-    const cancelled = getCancelledCodes()
-    return rows.map(row => {
-        // ── Match by code (exact) then by name (fallback) ──
-        const match = findCustomer(row.code, row.name)
+async function buildEntries(rows: ParsedRow[]): Promise<ReviewEntry[]> {
+    const overrides = await getAddressOverrides()
+    const cancelled = await getCancelledCodes()
+    
+    return Promise.all(rows.map(async row => {
+        const match = await findCustomer(row.code, row.name)
         const customer = match?.customer ?? null
-        // Use the matched customer's own code for override lookup
         const dbCode = customer?.code ?? row.code
         const override = overrides[dbCode] ?? overrides[row.code]
 
@@ -59,7 +58,7 @@ function buildEntries(rows: ParsedRow[]): ReviewEntry[] {
             isCancelled: cancelled.has(dbCode),
             availableAddresses,
         }
-    })
+    }))
 }
 
 
@@ -304,21 +303,24 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
     const listRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
-        const base = buildEntries(rows) // includes isCancelled:true for cancelled entries
-        const manual = getManualEntries()
-        const cancelled = getCancelledCodes()
-        const manualMapped: ReviewEntry[] = manual
-            .filter(m => !base.find(b => b.code === m.code))
-            .map(m => ({ ...m, isCancelled: cancelled.has(m.code) }))
-        setEntries([...base, ...manualMapped])
+        const boot = async () => {
+            const base = await buildEntries(rows)
+            const manual = await getManualEntries()
+            const cancelled = await getCancelledCodes()
+            const manualMapped: ReviewEntry[] = manual
+                .filter(m => !base.find(b => b.code === m.code))
+                .map(m => ({ ...m, isCancelled: cancelled.has(m.code) }))
+            setEntries([...base, ...manualMapped])
+        }
+        boot()
     }, [rows])
 
     const update = (code: string, patch: Partial<ReviewEntry>) =>
         setEntries(prev => prev.map(e => e.code === code ? { ...e, ...patch } : e))
 
-    const handleSelectAddress = (entry: ReviewEntry, addr: CustomerAddress) => {
+    const handleSelectAddress = async (entry: ReviewEntry, addr: CustomerAddress) => {
         // Save to daily session
-        setEntryOverride(entry.code, { lat: addr.lat, lng: addr.lng, address_text: addr.address_text })
+        await setEntryOverride(entry.code, { lat: addr.lat, lng: addr.lng, address_text: addr.address_text })
         update(entry.code, {
             lat: addr.lat, lng: addr.lng,
             address_text: addr.address_text, address_label: addr.label,
@@ -326,20 +328,20 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
         })
     }
 
-    const handleConfirmPicker = (lat: number, lng: number, label: string) => {
+    const handleConfirmPicker = async (lat: number, lng: number, label: string) => {
         if (!pickerFor) return
         const code = pickerFor.code
 
         // Save to daily session only — no permanent DB save
-        setEntryOverride(code, { lat, lng, address_text: label })
+        await setEntryOverride(code, { lat, lng, address_text: label })
 
         // Update local state (moves entry to "ready" section)
         update(code, { lat, lng, address_text: label, needsAddress: false })
 
         // If manual entry, also persist full entry to session
         if (pickerFor.isManual) {
-            const updated = entries.find(e => e.code === code)
-            if (updated) upsertManualEntry({ ...updated, lat, lng, address_text: label, needsAddress: false })
+            const updated = entries.find(e => e.code === code) || pickerFor
+            await upsertManualEntry({ ...updated, lat, lng, address_text: label, needsAddress: false })
         }
 
         setPickerFor(null)
@@ -351,49 +353,49 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
         }, 100)
     }
 
-    const handleAddManual = () => {
+    const handleAddManual = async () => {
         const code = `manual_${Date.now()}`
         const entry: ReviewEntry = {
             code, name: '', carts: 0, time_from: '', time_to: '', notes: '',
             lat: null, lng: null, address_text: '', address_label: '',
             isKnown: false, needsAddress: true, isManual: true, availableAddresses: [],
         }
-        upsertManualEntry(entry)
+        await upsertManualEntry(entry)
         setEntries(prev => [...prev, entry])
     }
 
-    const handleRemoveManual = (code: string) => {
-        removeManualEntry(code)
+    const handleRemoveManual = async (code: string) => {
+        await removeManualEntry(code)
         setEntries(prev => prev.filter(e => e.code !== code))
     }
 
     // Works for ALL entries (Excel + manual) — flips isCancelled flag
-    const handleRemoveEntry = (entry: ReviewEntry) => {
-        cancelEntry(entry.code)
-        if (entry.isManual) removeManualEntry(entry.code)
+    const handleRemoveEntry = async (entry: ReviewEntry) => {
+        await cancelEntry(entry.code)
+        if (entry.isManual) await removeManualEntry(entry.code)
         setEntries(prev => prev.map(e =>
             e.code === entry.code ? { ...e, isCancelled: true } : e
         ))
     }
 
-    const handleRestoreEntry = (entry: ReviewEntry) => {
-        restoreEntry(entry.code)
+    const handleRestoreEntry = async (entry: ReviewEntry) => {
+        await restoreEntry(entry.code)
         setEntries(prev => prev.map(e =>
             e.code === entry.code ? { ...e, isCancelled: false } : e
         ))
     }
 
-    const handleFieldChange = (code: string, field: keyof ReviewEntry, val: any) => {
-        setEntries(prev => prev.map(e => {
-            if (e.code !== code) return e
-            const updated = { ...e, [field]: val }
-            // Save to daily session for ALL entries
-            if (['time_from', 'time_to', 'carts', 'notes'].includes(field as string)) {
-                setEntryOverride(code, { [field]: val })
-            }
-            if (e.isManual) upsertManualEntry(updated)
-            return updated
-        }))
+    const handleFieldChange = async (code: string, field: keyof ReviewEntry, val: any) => {
+        setEntries(prev => prev.map(e => e.code === code ? { ...e, [field]: val } : e))
+        
+        if (['time_from', 'time_to', 'carts', 'notes'].includes(field as string)) {
+            await setEntryOverride(code, { [field]: val })
+        }
+        
+        const updated = entries.find(e => e.code === code)
+        if (updated?.isManual) {
+            await upsertManualEntry({ ...updated, [field]: val })
+        }
     }
 
     const handleBuild = () => {
