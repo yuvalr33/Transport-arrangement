@@ -57,7 +57,7 @@ function CustomerForm({
 }: {
     initial: Customer
     isNew: boolean
-    onSave: (c: Customer) => void
+    onSave: (c: Customer, oldCode?: string) => void
     onDelete: () => void
     onClose: () => void
 }) {
@@ -72,7 +72,7 @@ function CustomerForm({
     const handleSave = () => {
         if (!form.code.trim()) { setCodeError('קוד לקוח הוא שדה חובה'); return }
         if (!form.name.trim()) return
-        onSave(form)
+        onSave(form, !isNew && form.code !== initial.code ? initial.code : undefined)
     }
 
     const handlePickerConfirm = (lat: number, lng: number, label: string) => {
@@ -129,8 +129,6 @@ function CustomerForm({
                                 value={form.code}
                                 onChange={e => { set('code', e.target.value); setCodeError('') }}
                                 placeholder="למשל: 1234"
-                                disabled={!isNew}
-                                style={!isNew ? { opacity: 0.5 } : {}}
                             />
                             {codeError && <div className="text-[10px] text-red-400 mt-1">{codeError}</div>}
                         </div>
@@ -269,23 +267,24 @@ export function CustomerManager({ onClose }: { onClose: () => void }) {
     const [selected, setSelected] = useState<Customer | null>(null)
     const [isNew, setIsNew] = useState(false)
 
-    const reload = useCallback(() => {
-        setCustomers(getAllCustomers().sort((a, b) => a.name.localeCompare(b.name, 'he')))
+    const reload = useCallback(async () => {
+        const list = await getAllCustomers()
+        setCustomers(list.sort((a, b) => a.name.localeCompare(b.name, 'he')))
     }, [])
 
     useEffect(() => { reload() }, [reload])
 
-    const handleSave = (c: Customer) => {
-        upsertCustomer(c)
-        reload()
+    const handleSave = async (c: Customer, oldCode?: string) => {
+        await upsertCustomer(c, oldCode)
+        await reload()
         setSelected(c)
         setIsNew(false)
     }
 
-    const handleDelete = () => {
+    const handleDelete = async () => {
         if (!selected) return
-        deleteCustomer(selected.code)
-        reload()
+        await deleteCustomer(selected.code)
+        await reload()
         setSelected(null)
         setIsNew(false)
     }
