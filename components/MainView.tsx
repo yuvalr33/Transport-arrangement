@@ -1,0 +1,963 @@
+'use client'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import type { RoutesResult, Route, RouteStop } from '@/types'
+import { MapView } from './MapView'
+import { ReviewScreen } from './ReviewScreen'
+import { CustomerManager } from './CustomerManager'
+import { PickupsManager } from './PickupsManager'
+import { getAllPickupRecords } from '@/lib/pickupDb'
+import { getSelectedPickupIdsArray } from '@/lib/sessionStore'
+
+// ─── Columns (board) view ─────────────────────────────────────────────────────
+function ColumnsView({
+  routes,
+  onDragStart, onDragOver, onDrop, onDragEnd,
+  dragSrc, dragOverInfo,
+}: {
+  routes: Route[]
+  dragSrc: DragSrc | null
+  dragOverInfo: { routeId: number; stopIdx: number } | null
+  onDragStart: (routeId: number, stopIdx: number) => void
+  onDragOver: (e: React.DragEvent, routeId: number, stopIdx: number) => void
+  onDrop: (toRouteId: number, toStopIdx: number) => void
+  onDragEnd: () => void
+}) {
+  const hasWarn = (s: RouteStop) =>
+    s.notes && (s.notes.includes('חובה') || s.notes.includes('מזומן') || s.notes.includes('⚠'))
+
+  return (
+    <div className="flex gap-3 h-full overflow-x-auto overflow-y-hidden p-4" dir="rtl"
+      style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e2d45 transparent' }}>
+      {routes.map(route => {
+        const pct = Math.min(100, (route.total_carts / 18) * 100)
+        const isDraggingOver = dragSrc && dragOverInfo?.routeId === route.id
+
+        return (
+          <div
+            key={route.id}
+            className="flex flex-col rounded-2xl overflow-hidden shrink-0 transition-all"
+            style={{
+              width: 'clamp(220px, 20vw, 280px)',
+              background: '#0f1d30',
+              border: `1.5px solid ${isDraggingOver ? route.color : '#1e2d45'}`,
+              boxShadow: isDraggingOver ? `0 0 20px ${route.color}30` : undefined,
+            }}
+            onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+            onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+          >
+            {/* Column header */}
+            <div className="shrink-0 px-3 pt-3 pb-2"
+              style={{ background: route.color + '18', borderBottom: `1px solid ${route.color}30` }}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: route.color }} />
+                <span className="font-black text-sm flex-1 truncate" style={{ color: route.color }}>
+                  {route.name}
+                </span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{ background: route.color + '25', color: route.color }}>
+                  {route.direction}
+                </span>
+              </div>
+              {/* Capacity bar */}
+              <div className="h-1 rounded-full bg-white/10 overflow-hidden mb-1.5">
+                <div className="h-full rounded-full transition-all"
+                  style={{ width: `${pct}%`, background: route.color }} />
+              </div>
+              <div className="flex gap-2 text-[10px] font-semibold">
+                <span style={{ color: route.color }}>🛒 {route.total_carts}/18</span>
+                <span className="text-slate-500">·</span>
+                <span className="text-slate-400">{route.stops.length} עצירות</span>
+                <span className="text-slate-500">·</span>
+                <span className="text-slate-500">~{route.distance_km}ק"מ</span>
+              </div>
+            </div>
+
+            {/* Stops list — scrollable */}
+            <div className="flex-1 overflow-y-auto"
+              style={{ scrollbarWidth: 'thin', scrollbarColor: '#1e2d45 transparent' }}>
+              {/* Start */}
+              <div className="flex items-center gap-2 px-3 py-2 text-[10px] text-slate-600">
+                <span>🏠</span><span>מושב חגלה — יציאה</span>
+              </div>
+
+              {route.stops.map((s, i) => {
+                const isBeingDragged = dragSrc?.routeId === route.id && dragSrc?.stopIdx === i
+                const isDropTarget = dragOverInfo?.routeId === route.id && dragOverInfo?.stopIdx === i
+                const warn = hasWarn(s)
+
+                return (
+                  <div key={i}>
+                    {isDropTarget && (
+                      <div className="h-0.5 mx-2 my-0.5 rounded-full"
+                        style={{ background: route.color }} />
+                    )}
+                    <div
+                      draggable
+                      onDragStart={e => { e.stopPropagation(); onDragStart(route.id, i) }}
+                      onDragOver={e => onDragOver(e, route.id, i)}
+                      onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop(route.id, i) }}
+                      onDragEnd={onDragEnd}
+                      className="mx-2 mb-1 rounded-xl px-2.5 py-2 transition-all group"
+                      style={{
+                        background: isBeingDragged ? 'transparent' : warn ? 'rgba(239,68,68,.06)' : `${route.color}08`,
+                        border: `1px solid ${isBeingDragged ? 'transparent' : warn ? 'rgba(239,68,68,.2)' : route.color + '20'}`,
+                        opacity: isBeingDragged ? 0.3 : 1,
+                        cursor: dragSrc ? 'grabbing' : 'grab',
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        {/* Order badge */}
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 mt-0.5"
+                          style={{ background: route.color + '30', color: route.color }}>
+                          {s.order}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-[11px] truncate text-slate-200">{s.name}</div>
+                          <div className="text-[10px] text-slate-500 truncate mt-0.5">{s.address}</div>
+                          {/* Badges */}
+                          <div className="flex gap-1 mt-1 flex-wrap">
+                            {s.carts > 0 && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-amber-400/10 text-amber-300 font-semibold">
+                                🛒 {s.carts}
+                              </span>
+                            )}
+                            {s.time_window && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-blue-500/10 text-blue-300">
+                                ⏰ {s.time_window}
+                              </span>
+                            )}
+                            {warn && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-red-500/10 text-red-300">⚠️</span>
+                            )}
+                          </div>
+                          {s.notes && (
+                            <div className={`mt-1 text-[9px] leading-relaxed ${warn ? 'text-red-300/70' : 'text-slate-600'}`}>
+                              {s.notes}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Drop zone for cross-route drag */}
+              {dragSrc && dragSrc.routeId !== route.id && (
+                <div
+                  className="mx-2 mb-1 h-8 rounded-xl border border-dashed flex items-center justify-center text-[10px] transition-all"
+                  style={{
+                    borderColor: isDraggingOver ? route.color : '#1e2d45',
+                    color: isDraggingOver ? route.color : '#475569',
+                  }}
+                  onDragOver={e => onDragOver(e, route.id, route.stops.length)}
+                  onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+                >
+                  + הוסף לסוף הקו
+                </div>
+              )}
+
+              {/* End */}
+              <div className="flex items-center gap-2 px-3 py-2 text-[10px] text-slate-600 border-t border-white/5 mt-1">
+                <span>🏠</span><span>מושב חגלה — חזרה</span>
+              </div>
+
+              {/* ── Pickups for this route ── */}
+              {route.pickups?.length > 0 && (
+                <div className="border-t mt-1 pt-1 pb-2" style={{ borderColor: '#8b5cf620' }}>
+                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider"
+                    style={{ color: '#a78bfa' }}>
+                    ↩ איסופים ({route.pickups.length})
+                  </div>
+                  {route.pickups.map(p => (
+                    <div key={p.id} className="mx-2 mb-1 px-2.5 py-2 rounded-xl"
+                      style={{ background: '#8b5cf610', border: '1px solid #8b5cf630' }}>
+                      <div className="flex items-start gap-1.5">
+                        <span className="text-purple-400 text-sm shrink-0 mt-0.5">↩</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-[11px] text-purple-200 truncate">{p.name}</div>
+                          <div className="text-[10px] text-purple-300/70 truncate">📦 {p.what_to_collect}</div>
+                          <div className="text-[9px] text-slate-600 truncate mt-0.5">📍 {p.address_text}</div>
+                          {p.phone && (
+                            <div className="text-[9px] text-blue-400">📞 {p.phone}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Distance helper (mirrors lib/routing) ────────────────────────────────────
+const HAGLA_PT = { lat: 32.38639, lng: 34.92667 }
+
+function haversine(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371, p = Math.PI / 180
+  const a = Math.sin((lat2 - lat1) * p / 2) ** 2
+    + Math.cos(lat1 * p) * Math.cos(lat2 * p) * Math.sin((lng2 - lng1) * p / 2) ** 2
+  return R * 2 * Math.asin(Math.sqrt(a))
+}
+function calcKm(stops: RouteStop[]) {
+  const pts = [HAGLA_PT, ...stops.map(s => ({ lat: s.lat ?? HAGLA_PT.lat, lng: s.lng ?? HAGLA_PT.lng })), HAGLA_PT]
+  let d = 0
+  for (let i = 0; i < pts.length - 1; i++)
+    d += haversine(pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
+  return Math.round(d * 10) / 10
+}
+
+// ─── Drag state types ─────────────────────────────────────────────────────────
+interface DragSrc { routeId: number; stopIdx: number }
+
+// ─── Upload Zone ──────────────────────────────────────────────────────────────
+function UploadZone({ onFile, loading }: { onFile: (f: File) => void; loading: boolean }) {
+  const [drag, setDrag] = useState(false)
+  const ref = useRef<HTMLInputElement>(null)
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDrag(false)
+    const f = e.dataTransfer.files[0]
+    if (f) onFile(f)
+  }
+
+  return (
+    <div
+      onDrop={onDrop}
+      onDragOver={e => { e.preventDefault(); setDrag(true) }}
+      onDragLeave={() => setDrag(false)}
+      onClick={() => !loading && ref.current?.click()}
+      className={`
+        relative border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer select-none
+        ${drag ? 'border-amber-400 bg-amber-400/5' : 'border-border hover:border-slate-600'}
+        ${loading ? 'cursor-not-allowed' : ''}
+      `}
+    >
+      <input
+        ref={ref} type="file" accept=".xlsx,.xls"
+        className="hidden"
+        onChange={e => e.target.files?.[0] && onFile(e.target.files[0])}
+      />
+      {loading ? (
+        <div className="flex flex-col items-center gap-3">
+          <div className="text-5xl animate-bounce">🗺️</div>
+          <div className="font-bold text-slate-300 text-lg">ממיר כתובות ומחשב מסלולים...</div>
+          <div className="text-sm text-slate-500">זה עלול לקחת כחצי דקה</div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-3">
+          <div className={`text-6xl transition-transform ${drag ? 'scale-110' : ''}`}>📂</div>
+          <div className="font-black text-xl text-slate-200">גרור קובץ אקסל לכאן</div>
+          <div className="text-sm text-slate-500">או לחצי לבחירה &nbsp;·&nbsp; .xlsx / .xls</div>
+          <div className="mt-2 text-xs text-slate-600 leading-relaxed">
+            עמודות שהמערכת מזהה אוטומטית:<br />
+            <span className="text-slate-500">שם לקוח · כתובת · עגלות · החל משעה · עד שעה · הערות</span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Example table ─────────────────────────────────────────────────────────────
+function ExampleTable() {
+  return (
+    <div className="mt-6 bg-surface border border-border rounded-2xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-border text-xs font-bold text-slate-500 uppercase tracking-wider">
+        דוגמה לפורמט קובץ
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-panel">
+            {['שם לקוח', 'כתובת', 'עגלות', 'החל משעה', 'עד שעה', 'הערות'].map(h => (
+              <th key={h} className="text-right px-3 py-2 text-amber-400 font-bold">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="text-slate-400">
+          {[
+            ['משתלת בן יוסף', 'בוסתן בגליל', '3', '', '08:00', 'לא להשאיר בחוץ'],
+            ['יגור חקלאות', 'יגור', '5', '', '08:30', 'אחרי 8:30 תמיר חייב לחתום'],
+            ['משתלות וונדי', 'עין ורד', '2', '07:30', '08:00', ''],
+            ["עירית כפר סבא", 'כפר סבא', '0', '06:30', '07:00', "דב לאוטמן / סרג'ו"],
+          ].map((row, i) => (
+            <tr key={i} className="border-t border-border">
+              {row.map((v, j) => <td key={j} className="px-3 py-2">{v || '—'}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function StopLine({ icon, label, muted }: { icon: string; label: string; muted?: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5 py-1.5">
+      <div className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center text-[11px] shrink-0">
+        {icon}
+      </div>
+      <span className={`text-xs ${muted ? 'text-slate-600' : 'text-slate-300'}`}>{label}</span>
+    </div>
+  )
+}
+
+// ─── Route card in sidebar ─────────────────────────────────────────────────────
+function RouteCard({
+  route, open, active, onToggle,
+  dragSrc, onDragStart, onDragOver, onDrop, onDragEnd, onDeleteStop, dragOverInfo,
+}: {
+  route: Route; open: boolean; active: boolean; onToggle: () => void
+  dragSrc: DragSrc | null
+  onDragStart: (routeId: number, stopIdx: number) => void
+  onDragOver: (e: React.DragEvent, routeId: number, stopIdx: number) => void
+  onDrop: (toRouteId: number, toStopIdx: number) => void
+  onDragEnd: () => void
+  onDeleteStop: (routeId: number, stopIdx: number) => void
+  dragOverInfo: { routeId: number; stopIdx: number } | null
+}) {
+  const pct = Math.min(100, (route.total_carts / 18) * 100)
+  const hasWarn = (s: RouteStop) =>
+    s.notes && (s.notes.includes('חובה') || s.notes.includes('מזומן') || s.notes.includes('⚠'))
+
+  const isDraggingOver = dragSrc && dragOverInfo?.routeId === route.id
+  const isSourceRoute = dragSrc?.routeId === route.id
+
+  return (
+    <div
+      className="rounded-2xl border overflow-hidden transition-all"
+      style={{
+        borderColor: active ? route.color : isDraggingOver ? route.color + '80' : '#1e2d45',
+        background: active ? `${route.color}08` : '#0f1d30',
+      }}
+      // Drop onto route header = add to end
+      onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+      onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onToggle}>
+        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: route.color }} />
+        <span className="font-bold text-sm flex-1">{route.name}</span>
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          {[
+            [`${route.stops.length} עצירות`, route.color],
+            [`🛒 ${route.total_carts}`, '#fbbf24'],
+            [`~${route.distance_km}ק"מ`, '#94a3b8'],
+            ...(route.pickups?.length > 0 ? [[`↩ ${route.pickups.length}`, '#a78bfa']] : []),
+          ].map(([txt, col]) => (
+            <span key={txt} className="text-[11px] font-semibold px-2 py-0.5 rounded-full border"
+              style={{ color: col, borderColor: col + '33', background: col + '12' }}>
+              {txt}
+            </span>
+          ))}
+        </div>
+
+      </div>
+
+      {/* Capacity bar */}
+      <div className="h-0.5 mx-4 mb-1 bg-border rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: route.color }} />
+      </div>
+
+      {/* Stops list */}
+      {open && (
+        <div className="px-4 pb-3 pt-1 border-t border-white/5">
+          <StopLine icon="🏠" label="מושב חגלה — יציאה" muted />
+
+          {route.stops.map((s, i) => {
+            const isBeingDragged = dragSrc?.routeId === route.id && dragSrc?.stopIdx === i
+            const isDropTarget = dragOverInfo?.routeId === route.id && dragOverInfo?.stopIdx === i
+
+            return (
+              <div key={i}>
+                {/* Drop indicator line */}
+                {isDropTarget && (
+                  <div className="h-0.5 rounded-full mx-1 my-0.5 transition-all"
+                    style={{ background: route.color }} />
+                )}
+
+                <div
+                  draggable
+                  onDragStart={e => { e.stopPropagation(); onDragStart(route.id, i) }}
+                  onDragOver={e => onDragOver(e, route.id, i)}
+                  onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop(route.id, i) }}
+                  onDragEnd={onDragEnd}
+                  className={`
+                    flex items-start gap-2.5 py-1.5 border-b border-white/5 last:border-0
+                    rounded-lg transition-all group
+                    ${isBeingDragged ? 'opacity-30' : 'opacity-100'}
+                    ${dragSrc ? 'cursor-grabbing' : 'cursor-grab hover:bg-white/3'}
+                  `}
+                >
+                  {/* Drag handle */}
+                  <div className="text-slate-700 group-hover:text-slate-500 text-xs pt-1 shrink-0 select-none"
+                    style={{ cursor: 'grab' }}>
+                    ⠿
+                  </div>
+
+                  {/* Number badge */}
+                  <div
+                    className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5"
+                    style={{ background: route.color + '30', color: route.color }}
+                  >
+                    {s.order}
+                  </div>
+
+                  <div className="flex-1 min-w-0 text-xs">
+                    <div className="font-semibold truncate">{s.name}</div>
+                    <div className="text-slate-500 truncate mt-0.5">{s.address}</div>
+                    <div className="flex gap-1.5 mt-1 flex-wrap">
+                      {s.carts > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-400/10 text-amber-300">
+                          🛒 {s.carts}
+                        </span>
+                      )}
+                      {s.time_window && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-300">
+                          ⏰ {s.time_window}
+                        </span>
+                      )}
+                      {hasWarn(s) && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-red-500/10 text-red-300">⚠️</span>
+                      )}
+                    </div>
+                    {s.notes && (
+                      <div className={`mt-1 leading-relaxed text-[10px] ${hasWarn(s) ? 'text-red-300/70' : 'text-slate-500'}`}>
+                        {s.notes}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Delete button — visible on hover */}
+                  <button
+                    onClick={e => { e.stopPropagation(); onDeleteStop(route.id, i) }}
+                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-red-400 text-xs px-1 pt-0.5"
+                    title="מחק עצירה"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+
+          {/* Drop zone at the end of the list */}
+          {dragSrc && dragSrc.routeId !== route.id && (
+            <div
+              className="h-6 rounded-lg border border-dashed border-white/10 mt-1 flex items-center justify-center text-[10px] text-slate-600 hover:border-white/30 hover:text-slate-400 transition-all"
+              onDragOver={e => onDragOver(e, route.id, route.stops.length)}
+              onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+            >
+              + הוסף לסוף הקו
+            </div>
+          )}
+
+          <StopLine icon="🏠" label="מושב חגלה — חזרה" muted />
+
+          {/* ── Pickups for this route ── */}
+          {route.pickups?.length > 0 && (
+            <div className="mt-2 pt-2 border-t" style={{ borderColor: '#8b5cf620' }}>
+              <div className="text-[9px] font-bold uppercase tracking-wider mb-1.5 px-0.5"
+                style={{ color: '#a78bfa' }}>
+                ↩ איסופים ({route.pickups.length})
+              </div>
+              {route.pickups.map(p => (
+                <div key={p.id}
+                  className="flex items-start gap-2 py-1.5 border-b border-white/5 last:border-0"
+                  style={{ borderColor: '#8b5cf615' }}
+                >
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0 mt-0.5"
+                    style={{ background: '#8b5cf625', color: '#a78bfa' }}>↩</div>
+                  <div className="flex-1 min-w-0 text-xs">
+                    <div className="font-semibold truncate" style={{ color: '#c4b5fd' }}>{p.name}</div>
+                    <div className="truncate mt-0.5" style={{ color: '#7c3aed90' }}>📦 {p.what_to_collect}</div>
+                    <div className="text-slate-600 truncate text-[10px]">📍 {p.address_text}</div>
+                    {p.phone && <div className="text-blue-500/60 text-[10px]">📞 {p.phone}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+
+  )
+}
+
+// ─── Main ──────────────────────────────────────────────────────────────────────
+export function MainView() {
+  const [result, setResult] = useState<RoutesResult | null>(null)
+  const [reviewRows, setReviewRows] = useState<any[] | null>(null)  // parsed Excel rows
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [numTrucks, setNumTrucks] = useState(6)
+  const [openRoute, setOpenRoute] = useState<number | null>(null)
+  const [activeRoute, setActiveRoute] = useState<number | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [viewMode, setViewMode] = useState<'map' | 'columns'>('map')
+  const [showCustomers, setShowCustomers] = useState(false)
+  const [showPickups, setShowPickups] = useState(false)
+
+  // Drag state
+  const [dragSrc, setDragSrc] = useState<DragSrc | null>(null)
+  const [dragOver, setDragOver] = useState<{ routeId: number; stopIdx: number } | null>(null)
+
+  // ── Drag handlers ────────────────────────────────────────────────────────────
+  const handleDragStart = useCallback((routeId: number, stopIdx: number) => {
+    setDragSrc({ routeId, stopIdx })
+    // Expand both source route and keep open
+    setOpenRoute(routeId)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent, routeId: number, stopIdx: number) => {
+    e.preventDefault()
+    setDragOver({ routeId, stopIdx })
+    // Auto-expand route being dragged into
+    setOpenRoute(prev => prev === routeId ? prev : routeId)
+  }, [])
+
+  const handleDrop = useCallback((toRouteId: number, toStopIdx: number) => {
+    if (!dragSrc) return
+    const { routeId: fromRouteId, stopIdx: fromIdx } = dragSrc
+
+    setResult(prev => {
+      if (!prev) return prev
+      if (fromRouteId === toRouteId && fromIdx === toStopIdx) return prev
+
+      const routes = prev.routes.map(r => ({ ...r, stops: r.stops.map(s => ({ ...s })) }))
+      const from = routes.find(r => r.id === fromRouteId)
+      const to = routes.find(r => r.id === toRouteId)
+      if (!from || !to) return prev
+
+      const [stop] = from.stops.splice(fromIdx, 1)
+      // Adjust index if same route (splice shifts items)
+      const adjustedToIdx = fromRouteId === toRouteId && fromIdx < toStopIdx
+        ? toStopIdx - 1
+        : toStopIdx
+      to.stops.splice(Math.max(0, adjustedToIdx), 0, stop)
+
+      // Renumber and recalculate
+      from.stops.forEach((s, i) => { s.order = i + 1 })
+      to.stops.forEach((s, i) => { s.order = i + 1 })
+      from.total_carts = from.stops.reduce((a, s) => a + s.carts, 0)
+      to.total_carts = to.stops.reduce((a, s) => a + s.carts, 0)
+      from.distance_km = calcKm(from.stops)
+      to.distance_km = calcKm(to.stops)
+
+      const finalRoutes = routes.filter(r => r.stops.length > 0)
+      return {
+        ...prev,
+        routes: finalRoutes,
+        total_carts: finalRoutes.reduce((a, r) => a + r.total_carts, 0),
+        total_customers: finalRoutes.reduce((a, r) => a + r.stops.length, 0),
+      }
+    })
+
+    setDragSrc(null)
+    setDragOver(null)
+  }, [dragSrc])
+
+  const handleDragEnd = useCallback(() => {
+    setDragSrc(null)
+    setDragOver(null)
+  }, [])
+
+  // ── Delete a stop from a route ──────────────────────────────────────────
+  const handleDeleteStop = useCallback((routeId: number, stopIdx: number) => {
+    setResult(prev => {
+      if (!prev) return prev
+      const routes = prev.routes.map(r => ({ ...r, stops: r.stops.map(s => ({ ...s })) }))
+      const route = routes.find(r => r.id === routeId)
+      if (!route) return prev
+      route.stops.splice(stopIdx, 1)
+      route.stops.forEach((s, i) => { s.order = i + 1 })
+      route.total_carts = route.stops.reduce((a, s) => a + s.carts, 0)
+      route.distance_km = calcKm(route.stops)
+      // Remove empty routes
+      const finalRoutes = routes.filter(r => r.stops.length > 0)
+      return {
+        ...prev,
+        routes: finalRoutes,
+        total_carts: finalRoutes.reduce((a, r) => a + r.total_carts, 0),
+        total_customers: finalRoutes.reduce((a, r) => a + r.stops.length, 0),
+      }
+    })
+  }, [])
+
+  // ── File upload → parse only, advance to review ──────────────────────────────
+  const handleFile = useCallback(async (file: File) => {
+    setLoading(true); setError(''); setResult(null); setReviewRows(null)
+    setOpenRoute(null); setActiveRoute(null)
+    const fd = new FormData()
+    fd.append('file', file)
+    try {
+      const r = await fetch('/api/parse', { method: 'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'שגיאה')
+      setReviewRows(d.rows)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // ── Build routes from resolved stops + today's selected pickups ────────────────────
+  const handleSubmitStops = useCallback(async (stops: any[], trucks: number) => {
+    setLoading(true); setError('')
+    try {
+      const pickups = getAllPickupRecords()
+      const selectedPickupIds = getSelectedPickupIdsArray()
+      const r = await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stops, numTrucks: trucks, pickups, selectedPickupIds }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'שגיאה')
+      setResult(d)
+      setReviewRows(null)
+      setOpenRoute(null); setActiveRoute(null)
+      setNumTrucks(trucks)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // ── Re-route: extract current stops from result and re-send ─────────────────
+  const handleReroute = useCallback(async () => {
+    if (!result) return
+    // Flatten all current stops from all routes back to Stop format
+    const stops = result.routes.flatMap(route =>
+      route.stops.map(s => ({
+        name: s.name,
+        address: s.address,
+        carts: s.carts,
+        time_from: s.time_from,
+        time_to: s.time_to,
+        notes: s.notes,
+        lat: s.lat,
+        lng: s.lng,
+      }))
+    )
+    if (!stops.length) return
+    await handleSubmitStops(stops, numTrucks)
+  }, [result, numTrucks, handleSubmitStops])
+
+  const handleExport = async () => {
+    if (!result) return
+    setExporting(true)
+    try {
+      const r = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routes: result.routes, date: result.date }),
+      })
+      const blob = await r.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `קווים-${result.date.replace(/\//g, '-')}.xlsx`
+      a.click()
+    } finally { setExporting(false) }
+  }
+
+  const toggle = (id: number) => {
+    setOpenRoute(p => p === id ? null : id)
+    setActiveRoute(p => p === id ? null : id)
+  }
+  const showAll = () => { setActiveRoute(null); setOpenRoute(null) }
+
+  // ── If in review mode, show ReviewScreen ─────────────────────────────────────
+  if (reviewRows) {
+    return (
+      <ReviewScreen
+        rows={reviewRows}
+        numTrucks={numTrucks}
+        setNumTrucks={setNumTrucks}
+        onCancel={() => setReviewRows(null)}
+        onBuildRoutes={(entries, trucks) => { handleSubmitStops(entries, trucks) }}
+      />
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-screen overflow-hidden">
+
+      {/* ── Header ── */}
+      <header className="flex items-center gap-4 px-6 py-3 bg-surface border-b border-border shrink-0">
+        <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center text-xl shrink-0 shadow-lg">
+          🚛
+        </div>
+        <div>
+          <h1 className="font-black text-base tracking-tight">סידור קווי הפצה</h1>
+          <p className="text-xs text-slate-500">ינאי בתי צמיחה</p>
+        </div>
+
+        <div className="flex gap-2 mr-auto items-center flex-wrap">
+          {result && [
+            [`🚛 ${result.routes.length} קווים`, '#f59e0b'],
+            [`👥 ${result.total_customers} לקוחות`, '#3b82f6'],
+            [`🛒 ${result.total_carts} עגלות`, '#10b981'],
+          ].map(([txt, col]) => (
+            <span key={txt} className="text-xs font-bold px-3 py-1 rounded-full border"
+              style={{ color: col, borderColor: col + '40', background: col + '12' }}>
+              {txt}
+            </span>
+          ))}
+
+          {/* Customers DB button */}
+          <button
+            onClick={() => setShowCustomers(true)}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-black rounded-xl border-2 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #f59e0b18, #f59e0b08)',
+              color: '#f59e0b',
+              borderColor: '#f59e0b50',
+              boxShadow: '0 0 12px rgba(245,158,11,.15)',
+            }}
+          >
+            👥 לקוחות
+          </button>
+
+          {/* Pickups button */}
+          <button
+            onClick={() => setShowPickups(true)}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-black rounded-xl border-2 transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #8b5cf618, #8b5cf608)',
+              color: '#a78bfa',
+              borderColor: '#8b5cf650',
+              boxShadow: '0 0 12px rgba(139,92,246,.15)',
+            }}
+          >
+            ↩ איסופים
+          </button>
+
+          {/* View toggle — only shown when there are results */}
+          {result && (
+            <div className="flex items-center bg-panel border border-border rounded-xl overflow-hidden">
+              <button
+                onClick={() => setViewMode('map')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold transition-all"
+                style={{
+                  background: viewMode === 'map' ? '#f59e0b20' : 'transparent',
+                  color: viewMode === 'map' ? '#f59e0b' : '#475569',
+                }}
+              >
+                🗺️ מפה
+              </button>
+              <div className="w-px h-4 bg-border" />
+              <button
+                onClick={() => setViewMode('columns')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold transition-all"
+                style={{
+                  background: viewMode === 'columns' ? '#3b82f620' : 'transparent',
+                  color: viewMode === 'columns' ? '#93c5fd' : '#475569',
+                }}
+              >
+                📋 קווים
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Customer manager modal */}
+      {showCustomers && <CustomerManager onClose={() => setShowCustomers(false)} />}
+
+      {/* Pickups manager modal */}
+      {showPickups && <PickupsManager onClose={() => setShowPickups(false)} />}
+
+      {/* ── Body ── */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* ── Columns view (full screen, no sidebar) ── */}
+        {viewMode === 'columns' && result && (
+          <div className="flex-1 overflow-hidden" style={{ background: '#080f1a' }}>
+            <ColumnsView
+              routes={result.routes}
+              dragSrc={dragSrc}
+              dragOverInfo={dragOver}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+            />
+          </div>
+        )}
+
+        {/* ── Map mode: Sidebar + Map ── */}
+        {(viewMode === 'map' || !result) && (
+          <>
+            {/* ── Sidebar ── */}
+            <div className="w-[370px] shrink-0 flex flex-col bg-surface border-l border-border overflow-hidden">
+
+              {/* Controls */}
+              <div className="p-4 border-b border-border space-y-3">
+                <div className="flex gap-3 items-end">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                      משאיות
+                    </label>
+                    <input
+                      type="number" min={1} max={20} value={numTrucks}
+                      onChange={e => setNumTrucks(parseInt(e.target.value) || 1)}
+                      className="input w-20 text-center text-xl font-black"
+                    />
+                  </div>
+                  <div className="flex-1 text-xs text-slate-500 leading-relaxed pb-1">
+                    בחרי את מספר המשאיות הזמינות היום. המערכת תחלק בצורה מיטבית.
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2.5 text-xs text-red-300">
+                    ⚠️ {error}
+                  </div>
+                )}
+
+                {/* Drag instruction */}
+                {result && (
+                  <div className="text-[10px] text-slate-600 flex items-center gap-1.5">
+                    <span>⠿</span>
+                    <span>גרור עצירות בין קווים או בתוך קו לשינוי הסדר</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Scroll area */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+
+                {/* Upload zone or results */}
+                {!result && (
+                  <UploadZone onFile={handleFile} loading={loading} />
+                )}
+
+                {result && (
+                  <>
+                    {/* New file button */}
+                    <button
+                      className="btn-ghost w-full text-sm"
+                      onClick={() => { setResult(null); setError('') }}
+                    >
+                      📂 העלה קובץ חדש
+                    </button>
+
+                    {/* Re-route button */}
+                    <button
+                      className="w-full text-sm font-bold py-2 rounded-xl border-2 transition-all"
+                      disabled={loading}
+                      onClick={handleReroute}
+                      style={{
+                        background: loading ? '#1e2d45' : 'linear-gradient(135deg,#3b82f618,#3b82f608)',
+                        color: loading ? '#475569' : '#60a5fa',
+                        borderColor: loading ? '#1e2d45' : '#3b82f640',
+                      }}
+                    >
+                      {loading ? '⏳ מסדר...' : '🔄 סדר קווים מחדש'}
+                    </button>
+
+                    {/* Export */}
+                    <button className="btn-primary w-full" onClick={handleExport} disabled={exporting}>
+                      {exporting ? '⏳ מייצא...' : '📥 ייצוא Excel לנהגים'}
+                    </button>
+
+                    {/* No-address warning */}
+                    {result.no_address.length > 0 && (
+                      <div className="bg-red-500/8 border border-red-500/20 rounded-xl p-3 text-xs">
+                        <div className="font-bold text-red-400 mb-1">⚠️ חסרה כתובת ({result.no_address.length})</div>
+                        <div className="text-red-300/80 leading-relaxed">
+                          {result.no_address.join('، ')}
+                        </div>
+                        <div className="text-slate-500 mt-1">הוסיפי כתובת לקובץ כדי שיופיעו על המפה</div>
+                      </div>
+                    )}
+
+                    {/* Show all toggle */}
+                    <button className="btn-ghost w-full text-xs py-1.5" onClick={showAll}>
+                      ○ הצג את כל הקווים
+                    </button>
+
+                    {/* Route cards */}
+                    {result.routes.map(route => (
+                      <RouteCard
+                        key={route.id}
+                        route={route}
+                        open={openRoute === route.id}
+                        active={activeRoute === route.id}
+                        onToggle={() => toggle(route.id)}
+                        dragSrc={dragSrc}
+                        dragOverInfo={dragOver}
+                        onDragStart={handleDragStart}
+                        onDragOver={handleDragOver}
+                        onDrop={handleDrop}
+                        onDragEnd={handleDragEnd}
+                        onDeleteStop={handleDeleteStop}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* ── Map ── */}
+            <div className="flex-1 relative">
+              <MapView
+                routes={result?.routes ?? []}
+                activeId={activeRoute}
+                onSelect={toggle}
+              />
+
+              {/* Map legend */}
+              {result && result.routes.length > 0 && (
+                <div
+                  className="absolute bottom-5 right-5 bg-base/90 backdrop-blur border border-border rounded-2xl p-3 z-[1000] text-xs space-y-1.5"
+                  style={{ minWidth: 160 }}
+                >
+                  <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-2">קווים</div>
+                  <div
+                    className="flex items-center gap-2 cursor-pointer text-slate-400 hover:text-white transition-colors"
+                    onClick={showAll}
+                  >
+                    <div className="w-2 h-2 rounded-full bg-slate-600" />
+                    <span>הצג הכל</span>
+                  </div>
+                  {result.routes.map(r => (
+                    <div
+                      key={r.id}
+                      onClick={() => toggle(r.id)}
+                      className="flex items-center gap-2 cursor-pointer transition-opacity"
+                      style={{ opacity: activeRoute && activeRoute !== r.id ? 0.3 : 1 }}
+                    >
+                      <div className="w-2 h-2 rounded-full" style={{ background: r.color }} />
+                      <span>{r.name}</span>
+                      <span className="text-slate-500 mr-auto">{r.total_carts}🛒</span>
+                    </div>
+                  ))}
+                  <div className="border-t border-border pt-1.5 mt-1 text-[10px] text-slate-600">🏠 מושב חגלה</div>
+                </div>
+              )}
+
+              {/* Empty map placeholder — subtle, not covering */}
+              {!result && !loading && (
+                <div className="absolute bottom-4 right-4 pointer-events-none">
+                  <div className="text-right text-slate-700 text-xs">
+                    📍 מושב חגלה
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
