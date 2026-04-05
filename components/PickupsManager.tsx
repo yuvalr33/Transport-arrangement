@@ -26,6 +26,7 @@ function emptyRecord(): PickupRecord {
         what_to_collect: '',
         phone: '',
         notes: '',
+        carts: '',
         completions: [],
     }
 }
@@ -104,6 +105,7 @@ function PickupCard({
                     </div>
                     <div className="text-[10px] text-slate-500 truncate">
                         📦 {record.what_to_collect || '—'}
+                        {record.carts ? <span className="mr-2 text-amber-300 font-bold">🛒 {record.carts} עגלות</span> : null}
                         {hasAddress && <span className="mr-2 text-slate-700">· {record.address_text}</span>}
                     </div>
                 </div>
@@ -357,7 +359,12 @@ function PickupForm({
                                 onChange={e => set('what_to_collect', e.target.value)}
                                 placeholder="תיאור מה צריך לאסוף..." />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
+                            <div>
+                                <label className="block text-[11px] text-slate-500 mb-1">עגלות</label>
+                                <input className="input text-sm" type="number" step="0.5" min="0" value={form.carts ?? ''}
+                                    onChange={e => set('carts', parseFloat(e.target.value) || '')} placeholder="0" dir="ltr" />
+                            </div>
                             <div>
                                 <label className="block text-[11px] text-slate-500 mb-1">טלפון</label>
                                 <input className="input text-sm" type="tel" value={form.phone ?? ''}

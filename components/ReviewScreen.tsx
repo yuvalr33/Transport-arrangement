@@ -12,7 +12,8 @@ import { MapPicker } from './MapPicker'
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 interface ParsedRow {
-    code: string; name: string; carts: number
+    code: string; name: string; carts: number | string
+    trays?: number | string; carriers?: number | string; boxes?: number | string; packages_h?: number | string
     time_from: string; time_to: string; notes: string; address: string
 }
 
@@ -24,7 +25,7 @@ async function buildEntries(rows: ParsedRow[]): Promise<ReviewEntry[]> {
         const match = await findCustomer(row.code, row.name)
         const customer = match?.customer ?? null
         const dbCode = customer?.code ?? row.code
-        const override = overrides[dbCode] ?? overrides[row.code]
+        const override = overrides[row.code] || overrides[dbCode] || overrides[row.name]
 
         let lat: number | null = null
         let lng: number | null = null
@@ -48,6 +49,10 @@ async function buildEntries(rows: ParsedRow[]): Promise<ReviewEntry[]> {
             code: dbCode,
             name: row.name,
             carts: row.carts,
+            trays: row.trays,
+            carriers: row.carriers,
+            boxes: row.boxes,
+            packages_h: row.packages_h,
             time_from: row.time_from,
             time_to: row.time_to,
             notes: row.notes,
@@ -62,12 +67,15 @@ async function buildEntries(rows: ParsedRow[]): Promise<ReviewEntry[]> {
 }
 
 
-/** Convert a ReviewEntry to a Stop for route building */
 function entryToStop(e: ReviewEntry): Stop {
     return {
         name: e.name,
         address: e.address_text,
         carts: e.carts,
+        trays: e.trays,
+        carriers: e.carriers,
+        boxes: e.boxes,
+        packages_h: e.packages_h,
         time_from: e.time_from,
         time_to: e.time_to,
         notes: e.notes,
@@ -315,13 +323,12 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
         boot()
     }, [rows])
 
-    const update = (code: string, patch: Partial<ReviewEntry>) =>
+    const updateByCode = (code: string, patch: Partial<ReviewEntry>) =>
         setEntries(prev => prev.map(e => e.code === code ? { ...e, ...patch } : e))
 
     const handleSelectAddress = async (entry: ReviewEntry, addr: CustomerAddress) => {
-        // Save to daily session
         await setEntryOverride(entry.code, { lat: addr.lat, lng: addr.lng, address_text: addr.address_text })
-        update(entry.code, {
+        updateByCode(entry.code, {
             lat: addr.lat, lng: addr.lng,
             address_text: addr.address_text, address_label: addr.label,
             needsAddress: false,
@@ -332,11 +339,11 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
         if (!pickerFor) return
         const code = pickerFor.code
 
-        // Save to daily session only — no permanent DB save
+        // Save to daily session under the row's unique code
         await setEntryOverride(code, { lat, lng, address_text: label })
 
-        // Update local state (moves entry to "ready" section)
-        update(code, { lat, lng, address_text: label, needsAddress: false })
+        // Update local state (only this specific row)
+        updateByCode(code, { lat, lng, address_text: label, needsAddress: false })
 
         // If manual entry, also persist full entry to session
         if (pickerFor.isManual) {
@@ -354,7 +361,7 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
     }
 
     const handleAddManual = async () => {
-        const code = `manual_${Date.now()}`
+        const code = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
         const entry: ReviewEntry = {
             code, name: '', carts: 0, time_from: '', time_to: '', notes: '',
             lat: null, lng: null, address_text: '', address_label: '',
