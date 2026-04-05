@@ -344,17 +344,20 @@ function RouteCard({
         <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: route.color }} />
         <span className="font-bold text-sm flex-1">{route.name}</span>
         <div className="flex gap-1.5 flex-wrap justify-end">
-          {[
-            [`${route.stops.length} עצירות`, route.color],
-            [`🛒 ${route.total_carts}`, '#fbbf24'],
-            [`~${route.distance_km}ק"מ`, '#94a3b8'],
-            ...(route.pickups?.length > 0 ? [[`↩ ${route.pickups.length}`, '#a78bfa']] : []),
-          ].map(([txt, col]) => (
+          {(() => {
+            const pCarts = route.pickups?.reduce((a, p) => a + (p.carts !== undefined && p.carts !== '' ? Number(p.carts) : 1), 0) || 0
+            return [
+              [`${route.stops.length} עצירות`, route.color],
+              [`🛒 ${route.total_carts} עגלות לחלוקה`, '#fbbf24'],
+              ...(pCarts > 0 ? [[`↩ ${pCarts} עגלות לאיסוף`, '#a78bfa']] : []),
+              [`~${route.distance_km}ק"מ`, '#94a3b8'],
+            ].map(([txt, col]) => (
             <span key={txt} className="text-[11px] font-semibold px-2 py-0.5 rounded-full border"
               style={{ color: col, borderColor: col + '33', background: col + '12' }}>
               {txt}
             </span>
-          ))}
+            ))
+          })()}
         </div>
 
       </div>
@@ -641,6 +644,10 @@ export function MainView() {
         name: s.name,
         address: s.address,
         carts: s.carts,
+        trays: s.trays,
+        carriers: s.carriers,
+        boxes: s.boxes,
+        packages_h: s.packages_h,
         time_from: s.time_from,
         time_to: s.time_to,
         notes: s.notes,
@@ -702,16 +709,21 @@ export function MainView() {
         </div>
 
         <div className="flex gap-2 mr-auto items-center flex-wrap">
-          {result && [
-            [`🚛 ${result.routes.length} קווים`, '#f59e0b'],
-            [`👥 ${result.total_customers} לקוחות`, '#3b82f6'],
-            [`🛒 ${result.total_carts} עגלות`, '#10b981'],
-          ].map(([txt, col]) => (
-            <span key={txt} className="text-xs font-bold px-3 py-1 rounded-full border"
-              style={{ color: col, borderColor: col + '40', background: col + '12' }}>
-              {txt}
-            </span>
-          ))}
+          {(() => {
+            const sumPickupsCarts = result?.routes.reduce((acc, r) => acc + (r.pickups?.reduce((pA, p) => pA + (p.carts !== undefined && p.carts !== '' ? Number(p.carts) : 1), 0) || 0), 0) || 0
+            
+            return result && [
+              [`🚛 ${result.routes.length} קווים`, '#f59e0b'],
+              [`👥 ${result.total_customers} לקוחות`, '#3b82f6'],
+              [`🛒 ${result.total_carts} עגלות לחלוקה`, '#10b981'],
+              ...(sumPickupsCarts > 0 ? [[`↩ ${sumPickupsCarts} עגלות לאיסוף`, '#8b5cf6']] : []),
+            ].map(([txt, col]) => (
+              <span key={txt} className="text-xs font-bold px-3 py-1 rounded-full border"
+                style={{ color: col, borderColor: col + '40', background: col + '12' }}>
+                {txt}
+              </span>
+            ))
+          })()}
 
           {/* Customers DB button */}
           <button

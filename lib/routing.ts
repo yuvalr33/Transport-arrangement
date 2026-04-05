@@ -278,6 +278,7 @@ export function assignPickups(routes: Route[], pickups: PickupRecord[]): Route[]
       what_to_collect: pickup.what_to_collect,
       phone: pickup.phone,
       notes: pickup.notes,
+      carts: pickup.carts,
       order: result[bestRouteIdx].pickups.length + 1,
     }
     result[bestRouteIdx].pickups.push(rp)

@@ -12,6 +12,7 @@ export async function getAllPickupRecords(): Promise<PickupRecord[]> {
 
     return pData.map(p => ({
         ...p,
+        carts: p.carts || 0,
         completions: cData.filter(c => c.pickup_id === p.id).map(c => ({
             date: c.date,
             done: c.done,
@@ -28,12 +29,13 @@ export async function getPickupRecord(id: string): Promise<PickupRecord | null> 
     
     return {
         ...p,
+        carts: p.carts || 0,
         completions: (cData || []).map(c => ({ date: c.date, done: c.done, note: c.note || undefined }))
     }
 }
 
 export async function upsertPickupRecord(record: PickupRecord) {
-    await supabase.from('pickups').upsert({
+    const payload = {
         id: record.id,
         name: record.name,
         address_text: record.address_text,
@@ -42,9 +44,21 @@ export async function upsertPickupRecord(record: PickupRecord) {
         what_to_collect: record.what_to_collect,
         phone: record.phone || null,
         notes: record.notes || null,
-    })
-    
-    // We don't overwrite completions here, completions are added separately
+        carts: record.carts || null,
+    }
+
+    const { error } = await supabase.from('pickups').upsert(payload)
+    if (error) {
+        console.error('Error saving pickup (will try fallback without carts):', error)
+        try {
+            delete (payload as any).carts
+            delete (payload as any).phone
+            delete (payload as any).notes
+            await supabase.from('pickups').upsert(payload)
+        } catch (e) {
+            console.error('Exception in pickup fallback:', e)
+        }
+    }
 }
 
 export async function deletePickupRecord(id: string) {

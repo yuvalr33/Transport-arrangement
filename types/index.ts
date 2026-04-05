@@ -2,7 +2,11 @@
 export interface Stop {
   name: string
   address: string
-  carts: number
+  carts: number | string
+  trays?: number | string
+  carriers?: number | string
+  boxes?: number | string
+  packages_h?: number | string
   time_from: string
   time_to: string
   notes: string
@@ -57,6 +61,7 @@ export interface PickupRecord {
   what_to_collect: string
   phone?: string
   notes?: string
+  carts?: number | string
   completions: PickupCompletion[]   // history, newest first
 }
 
@@ -70,6 +75,7 @@ export interface Pickup {
   what_to_collect: string
   phone?: string
   notes?: string
+  carts?: number | string
   selected: boolean         // include in today's routing
 }
 
@@ -82,6 +88,7 @@ export interface RoutePickup {
   what_to_collect: string
   phone?: string
   notes?: string
+  carts?: number | string
   order: number             // position in route (inserted by proximity)
 }
 
@@ -108,7 +115,11 @@ export interface Customer {
 export interface ReviewEntry {
   code: string
   name: string
-  carts: number
+  carts: number | string
+  trays?: number | string
+  carriers?: number | string
+  boxes?: number | string
+  packages_h?: number | string
   time_from: string
   time_to: string
   notes: string
