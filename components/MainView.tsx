@@ -116,7 +116,7 @@ function ColumnsView({
                           <div className="text-[10px] text-slate-500 truncate mt-0.5">{s.address}</div>
                           {/* Badges */}
                           <div className="flex gap-1 mt-1 flex-wrap">
-                            {s.carts > 0 && (
+                            {Number(s.carts) > 0 && (
                               <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-amber-400/10 text-amber-300 font-semibold">
                                 🛒 {s.carts}
                               </span>
@@ -212,6 +212,84 @@ function calcKm(stops: RouteStop[]) {
   return Math.round(d * 10) / 10
 }
 
+// ─── Smart merge: keep existing layout, update quantities ─────────────────────
+const MAX_CARTS_LIMIT = 18
+
+function mergeIntoExistingRoutes(
+  existing: RoutesResult,
+  newStops: any[],
+): { routes: Route[]; warnings: string[]; unassigned: any[] } {
+  const routes: Route[] = existing.routes.map(r => ({
+    ...r,
+    stops: r.stops.map(s => ({ ...s })),
+    pickups: [...r.pickups],
+  }))
+  const warnings: string[] = []
+  const unassigned: any[] = []
+
+  for (const ns of newStops) {
+    const newName = ns.name.trim().toLowerCase()
+    let found = false
+    outer: for (const route of routes) {
+      for (let i = 0; i < route.stops.length; i++) {
+        if (route.stops[i].name.trim().toLowerCase() === newName) {
+          route.stops[i] = {
+            ...route.stops[i],
+            carts:      ns.carts      ?? route.stops[i].carts,
+            trays:      ns.trays,
+            carriers:   ns.carriers,
+            boxes:      ns.boxes,
+            packages_h: ns.packages_h,
+            time_from:  ns.time_from  || route.stops[i].time_from,
+            time_to:    ns.time_to    || route.stops[i].time_to,
+            notes:      ns.notes !== undefined ? ns.notes : route.stops[i].notes,
+          }
+          found = true
+          break outer
+        }
+      }
+    }
+
+    if (!found) {
+      if (ns.lat && ns.lng) {
+        let bestRoute: Route | null = null
+        let bestDist = Infinity
+        for (const route of routes) {
+          const used = route.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+          if (used + Number(ns.carts || 0) > MAX_CARTS_LIMIT) continue
+          for (const stop of route.stops) {
+            if (!stop.lat || !stop.lng) continue
+            const d = haversine(ns.lat, ns.lng, stop.lat, stop.lng)
+            if (d < bestDist) { bestDist = d; bestRoute = route }
+          }
+        }
+        if (bestRoute) {
+          const tw = ns.time_from && ns.time_to ? `${ns.time_from}–${ns.time_to}`
+            : ns.time_from ? `מ-${ns.time_from}` : ns.time_to ? `עד ${ns.time_to}` : ''
+          bestRoute.stops.push({
+            ...ns, address: ns.address || '',
+            order: bestRoute.stops.length + 1, time_window: tw,
+          } as RouteStop)
+        } else {
+          unassigned.push({ ...ns, _reason: 'אין קו עם קיבולת פנויה' })
+        }
+      } else {
+        unassigned.push({ ...ns, _reason: 'חסרה כתובת' })
+      }
+    }
+  }
+
+  for (const route of routes) {
+    const total = route.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+    if (total > MAX_CARTS_LIMIT)
+      warnings.push(`⚠️ ${route.name}: ${total} עגלות (חריגה ממגבלת ${MAX_CARTS_LIMIT})`)
+    route.total_carts = total
+    route.stops.forEach((s, i) => { s.order = i + 1 })
+    route.distance_km = calcKm(route.stops)
+  }
+  return { routes, warnings, unassigned }
+}
+
 // ─── Drag state types ─────────────────────────────────────────────────────────
 interface DragSrc { routeId: number; stopIdx: number }
 
@@ -292,6 +370,50 @@ function ExampleTable() {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ─── Merge choice dialog ─────────────────────────────────────────────────────
+function MergeDialog({
+  pending, existingRoutes, onFresh, onMerge,
+}: {
+  pending: any[]; existingRoutes: Route[]; onFresh: () => void; onMerge: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[9200] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,.78)', backdropFilter: 'blur(6px)' }}>
+      <div className="rounded-2xl shadow-2xl overflow-hidden"
+        style={{ width: 540, maxWidth: '95vw', background: '#0a1525', border: '1px solid #1e2d45' }}>
+        <div className="px-6 pt-6 pb-4 text-center">
+          <div className="text-5xl mb-3">📂</div>
+          <div className="font-black text-xl text-slate-100 mb-1">נמצא סידור קווים קיים להיום</div>
+          <div className="text-sm text-slate-500">
+            {pending.length} לקוחות בקובץ החדש · {existingRoutes.length} קווים בסידור הנוכחי
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4 px-6 pb-6" dir="rtl">
+          <button onClick={onMerge}
+            className="rounded-2xl border-2 p-4 text-right transition-all hover:scale-[1.02] active:scale-[.98]"
+            style={{ borderColor: '#10b98150', background: 'linear-gradient(135deg,#10b98115,#10b98105)', color: '#34d399' }}>
+            <div className="text-2xl mb-2">✅</div>
+            <div className="font-black text-sm mb-1">עדכן כמויות</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
+              שומר על הסידור הנוכחי (כולל שינויים ידניים).<br />
+              מעדכן כמויות, משבץ לקוחות חדשים או מסמן לשיבוץ ידני.
+            </div>
+          </button>
+          <button onClick={onFresh}
+            className="rounded-2xl border-2 p-4 text-right transition-all hover:scale-[1.02] active:scale-[.98]"
+            style={{ borderColor: '#3b82f650', background: 'linear-gradient(135deg,#3b82f615,#3b82f605)', color: '#60a5fa' }}>
+            <div className="text-2xl mb-2">🔄</div>
+            <div className="font-black text-sm mb-1">סדר קווים מחדש</div>
+            <div className="text-[11px] text-slate-500 leading-relaxed">
+              מוחק את הסידור הנוכחי ומחשב מסלולים אופטימליים מחדש.
+            </div>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -415,7 +537,7 @@ function RouteCard({
                     <div className="font-semibold truncate">{s.name}</div>
                     <div className="text-slate-500 truncate mt-0.5">{s.address}</div>
                     <div className="flex gap-1.5 mt-1 flex-wrap">
-                      {s.carts > 0 && (
+                      {Number(s.carts) > 0 && (
                         <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-400/10 text-amber-300">
                           🛒 {s.carts}
                         </span>
@@ -507,6 +629,18 @@ export function MainView() {
   const [showCustomers, setShowCustomers] = useState(false)
   const [showPickups, setShowPickups] = useState(false)
 
+  // ── Merge dialog state ─────────────────────────────────────────────────────────────
+  const [pendingStops, setPendingStops] = useState<any[] | null>(null)
+  const [pendingTrucks, setPendingTrucks] = useState(6)
+  const [showMergeDialog, setShowMergeDialog] = useState(false)
+  const [mergeWarnings, setMergeWarnings] = useState<string[]>([])
+  const [mergeUnassigned, setMergeUnassigned] = useState<any[]>([])
+  // ref keeps result accessible inside callbacks without re-creating them
+  const resultRef = useRef<RoutesResult | null>(null)
+  useEffect(() => { resultRef.current = result }, [result])
+  // ref for the hidden file input used when result already exists
+  const reuploadRef = useRef<HTMLInputElement>(null)
+
   // Drag state
   const [dragSrc, setDragSrc] = useState<DragSrc | null>(null)
   const [dragOver, setDragOver] = useState<{ routeId: number; stopIdx: number } | null>(null)
@@ -548,8 +682,8 @@ export function MainView() {
       // Renumber and recalculate
       from.stops.forEach((s, i) => { s.order = i + 1 })
       to.stops.forEach((s, i) => { s.order = i + 1 })
-      from.total_carts = from.stops.reduce((a, s) => a + s.carts, 0)
-      to.total_carts = to.stops.reduce((a, s) => a + s.carts, 0)
+      from.total_carts = from.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+      to.total_carts = to.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
       from.distance_km = calcKm(from.stops)
       to.distance_km = calcKm(to.stops)
 
@@ -571,48 +705,8 @@ export function MainView() {
     setDragOver(null)
   }, [])
 
-  // ── Delete a stop from a route ──────────────────────────────────────────
-  const handleDeleteStop = useCallback((routeId: number, stopIdx: number) => {
-    setResult(prev => {
-      if (!prev) return prev
-      const routes = prev.routes.map(r => ({ ...r, stops: r.stops.map(s => ({ ...s })) }))
-      const route = routes.find(r => r.id === routeId)
-      if (!route) return prev
-      route.stops.splice(stopIdx, 1)
-      route.stops.forEach((s, i) => { s.order = i + 1 })
-      route.total_carts = route.stops.reduce((a, s) => a + s.carts, 0)
-      route.distance_km = calcKm(route.stops)
-      // Remove empty routes
-      const finalRoutes = routes.filter(r => r.stops.length > 0)
-      return {
-        ...prev,
-        routes: finalRoutes,
-        total_carts: finalRoutes.reduce((a, r) => a + r.total_carts, 0),
-        total_customers: finalRoutes.reduce((a, r) => a + r.stops.length, 0),
-      }
-    })
-  }, [])
-
-  // ── File upload → parse only, advance to review ──────────────────────────────
-  const handleFile = useCallback(async (file: File) => {
-    setLoading(true); setError(''); setResult(null); setReviewRows(null)
-    setOpenRoute(null); setActiveRoute(null)
-    const fd = new FormData()
-    fd.append('file', file)
-    try {
-      const r = await fetch('/api/parse', { method: 'POST', body: fd })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error || 'שגיאה')
-      setReviewRows(d.rows)
-    } catch (e: any) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // ── Build routes from resolved stops + today's selected pickups ────────────────────
-  const handleSubmitStops = useCallback(async (stops: any[], trucks: number) => {
+  // ── Core: call API and set routes result ───────────────────────────────────────
+  const doBuildRoutes = useCallback(async (stops: any[], trucks: number) => {
     setLoading(true); setError('')
     try {
       const pickups = await getAllPickupRecords()
@@ -628,6 +722,86 @@ export function MainView() {
       setReviewRows(null)
       setOpenRoute(null); setActiveRoute(null)
       setNumTrucks(trucks)
+      setMergeWarnings([])
+      setMergeUnassigned([])
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // ── If existing result → offer merge dialog; otherwise build fresh ──────────────
+  const handleSubmitStops = useCallback(async (stops: any[], trucks: number) => {
+    if (resultRef.current) {
+      setPendingStops(stops)
+      setPendingTrucks(trucks)
+      setShowMergeDialog(true)
+      return
+    }
+    await doBuildRoutes(stops, trucks)
+  }, [doBuildRoutes])
+
+  // ── Handle merge dialog choice ─────────────────────────────────────────────
+  const handleMergeChoice = useCallback(async (choice: 'fresh' | 'merge') => {
+    setShowMergeDialog(false)
+    if (!pendingStops) return
+    const stops = pendingStops
+    const trucks = pendingTrucks
+    setPendingStops(null)
+    if (choice === 'fresh') {
+      setResult(null)
+      await doBuildRoutes(stops, trucks)
+    } else {
+      const existing = resultRef.current
+      if (!existing) return
+      const { routes, warnings, unassigned } = mergeIntoExistingRoutes(existing, stops)
+      setResult({
+        ...existing,
+        routes,
+        total_carts: routes.reduce((a, r) => a + r.total_carts, 0),
+        total_customers: routes.reduce((a, r) => a + r.stops.length, 0),
+      })
+      setReviewRows(null)
+      setMergeWarnings(warnings)
+      setMergeUnassigned(unassigned)
+    }
+  }, [pendingStops, pendingTrucks, doBuildRoutes])
+
+  // ── Delete a stop from a route ──────────────────────────────────────────
+  const handleDeleteStop = useCallback((routeId: number, stopIdx: number) => {
+    setResult(prev => {
+      if (!prev) return prev
+      const routes = prev.routes.map(r => ({ ...r, stops: r.stops.map(s => ({ ...s })) }))
+      const route = routes.find(r => r.id === routeId)
+      if (!route) return prev
+      route.stops.splice(stopIdx, 1)
+      route.stops.forEach((s, i) => { s.order = i + 1 })
+      route.total_carts = route.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+      route.distance_km = calcKm(route.stops)
+      // Remove empty routes
+      const finalRoutes = routes.filter(r => r.stops.length > 0)
+      return {
+        ...prev,
+        routes: finalRoutes,
+        total_carts: finalRoutes.reduce((a, r) => a + r.total_carts, 0),
+        total_customers: finalRoutes.reduce((a, r) => a + r.stops.length, 0),
+      }
+    })
+  }, [])
+
+  // ── File upload → parse only, advance to review ──────────────────────────────
+  const handleFile = useCallback(async (file: File) => {
+    // NOTE: do NOT clear result here — we keep it so the user can choose merge vs fresh
+    setLoading(true); setError(''); setReviewRows(null)
+    setOpenRoute(null); setActiveRoute(null)
+    const fd = new FormData()
+    fd.append('file', file)
+    try {
+      const r = await fetch('/api/parse', { method: 'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'שגיאה')
+      setReviewRows(d.rows)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -638,26 +812,19 @@ export function MainView() {
   // ── Re-route: extract current stops from result and re-send ─────────────────
   const handleReroute = useCallback(async () => {
     if (!result) return
-    // Flatten all current stops from all routes back to Stop format
     const stops = result.routes.flatMap(route =>
       route.stops.map(s => ({
-        name: s.name,
-        address: s.address,
-        carts: s.carts,
-        trays: s.trays,
-        carriers: s.carriers,
-        boxes: s.boxes,
-        packages_h: s.packages_h,
-        time_from: s.time_from,
-        time_to: s.time_to,
-        notes: s.notes,
-        lat: s.lat,
-        lng: s.lng,
+        name: s.name, address: s.address,
+        carts: s.carts, trays: s.trays, carriers: s.carriers,
+        boxes: s.boxes, packages_h: s.packages_h,
+        time_from: s.time_from, time_to: s.time_to,
+        notes: s.notes, lat: s.lat, lng: s.lng,
       }))
     )
     if (!stops.length) return
-    await handleSubmitStops(stops, numTrucks)
-  }, [result, numTrucks, handleSubmitStops])
+    // Re-route always goes fresh — bypasses merge dialog
+    await doBuildRoutes(stops, numTrucks)
+  }, [result, numTrucks, doBuildRoutes])
 
   const handleExport = async () => {
     if (!result) return
@@ -685,13 +852,23 @@ export function MainView() {
   // ── If in review mode, show ReviewScreen ─────────────────────────────────────
   if (reviewRows) {
     return (
-      <ReviewScreen
-        rows={reviewRows}
-        numTrucks={numTrucks}
-        setNumTrucks={setNumTrucks}
-        onCancel={() => setReviewRows(null)}
-        onBuildRoutes={(entries, trucks) => { handleSubmitStops(entries, trucks) }}
-      />
+      <>
+        <ReviewScreen
+          rows={reviewRows}
+          numTrucks={numTrucks}
+          setNumTrucks={setNumTrucks}
+          onCancel={() => setReviewRows(null)}
+          onBuildRoutes={(entries, trucks) => { handleSubmitStops(entries, trucks) }}
+        />
+        {showMergeDialog && pendingStops && result && (
+          <MergeDialog
+            pending={pendingStops}
+            existingRoutes={result.routes}
+            onFresh={() => handleMergeChoice('fresh')}
+            onMerge={() => handleMergeChoice('merge')}
+          />
+        )}
+      </>
     )
   }
 
@@ -848,17 +1025,26 @@ export function MainView() {
               {/* Scroll area */}
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
 
-                {/* Upload zone or results */}
+                {/* Upload zone — shown only when no result yet */}
                 {!result && (
                   <UploadZone onFile={handleFile} loading={loading} />
                 )}
 
+                {/* Hidden file input for re-upload when result already exists */}
+                <input
+                  ref={reuploadRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) { e.target.value=''; handleFile(f) } }}
+                />
+
                 {result && (
                   <>
-                    {/* New file button */}
+                    {/* New file button — opens picker WITHOUT clearing result */}
                     <button
                       className="btn-ghost w-full text-sm"
-                      onClick={() => { setResult(null); setError('') }}
+                      onClick={() => { setError(''); reuploadRef.current?.click() }}
                     >
                       📂 העלה קובץ חדש
                     </button>
@@ -881,6 +1067,30 @@ export function MainView() {
                     <button className="btn-primary w-full" onClick={handleExport} disabled={exporting}>
                       {exporting ? '⏳ מייצא...' : '📥 ייצוא Excel לנהגים'}
                     </button>
+
+                    {/* Merge warnings */}
+                    {mergeWarnings.length > 0 && (
+                      <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 text-xs">
+                        <div className="font-bold text-amber-400 mb-1.5">⚠️ חריגות עומס ({mergeWarnings.length})</div>
+                        {mergeWarnings.map((w, i) => (
+                          <div key={i} className="text-amber-300/80 py-0.5">{w}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Unassigned after merge */}
+                    {mergeUnassigned.length > 0 && (
+                      <div className="bg-blue-500/8 border border-blue-500/20 rounded-xl p-3 text-xs">
+                        <div className="font-bold text-blue-400 mb-1.5">🔵 ממתינים לשיבוץ ידני ({mergeUnassigned.length})</div>
+                        {mergeUnassigned.map((s, i) => (
+                          <div key={i} className="flex items-center gap-2 py-0.5 border-b border-white/5 last:border-0">
+                            <span className="text-slate-400 flex-1 truncate font-medium">{s.name}</span>
+                            <span className="text-slate-600 text-[10px] shrink-0">{s._reason}</span>
+                          </div>
+                        ))}
+                        <div className="text-slate-600 mt-1.5">גרור לקו המתאים מרשימת הקווים</div>
+                      </div>
+                    )}
 
                     {/* No-address warning */}
                     {result.no_address.length > 0 && (
