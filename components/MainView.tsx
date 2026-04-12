@@ -460,6 +460,41 @@ function MergeDialog({
   )
 }
 
+// ── Restore previous session dialog ──
+function RestoreDialog({
+  onRestore, onFresh
+}: {
+  onRestore: () => void; onFresh: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[9200] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,.78)', backdropFilter: 'blur(6px)' }}>
+      <div className="rounded-2xl shadow-2xl overflow-hidden"
+        style={{ width: 440, maxWidth: '95vw', background: '#0a1525', border: '1px solid #1e2d45' }} dir="rtl">
+        <div className="px-6 pt-6 pb-4 text-center">
+          <div className="text-5xl mb-3">🕒</div>
+          <div className="font-black text-xl text-slate-100 mb-1">נמצא סידור להיום</div>
+          <div className="text-sm text-slate-500">
+            יש במערכת סידור קווים ששמור להיום. האם להמשיך ממנו או להתחיל מחדש?
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 px-6 pb-6">
+          <button onClick={onRestore}
+            className="rounded-xl border-2 p-3 text-center transition-all hover:scale-[1.02] active:scale-[.98]"
+            style={{ borderColor: '#10b98150', background: 'linear-gradient(135deg,#10b98115,#10b98105)', color: '#34d399' }}>
+            <div className="font-bold text-sm">המשך את הסידור האחרון</div>
+          </button>
+          <button onClick={onFresh}
+            className="rounded-xl border-2 p-3 text-center transition-all hover:scale-[1.02] active:scale-[.98]"
+            style={{ borderColor: '#ef444450', background: 'linear-gradient(135deg,#ef444415,#ef444405)', color: '#f87171' }}>
+            <div className="font-bold text-sm">התחל סידור חדש ומחק את הקודם</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StopLine({ icon, label, muted }: { icon: string; label: string; muted?: boolean }) {
   return (
     <div className="flex items-center gap-2.5 py-1.5">
@@ -711,6 +746,7 @@ export function MainView() {
   const [showCustomers, setShowCustomers] = useState(false)
   const [showPickups, setShowPickups] = useState(false)
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false)
+  const [savedResultToRestore, setSavedResultToRestore] = useState<RoutesResult | null>(null)
 
   // ── Merge dialog state ─────────────────────────────────────────────────────────────
   const [pendingStops, setPendingStops] = useState<any[] | null>(null)
@@ -727,8 +763,12 @@ export function MainView() {
   // Load from Supabase on mount
   useEffect(() => {
     getRoutesResult().then(r => {
-      if (r) setResult(r)
-      setIsInitialLoadDone(true)
+      // If there's a valid result saved, show the restore dialog instead of auto-loading
+      if (r && r.routes && r.routes.length > 0) {
+        setSavedResultToRestore(r)
+      } else {
+        setIsInitialLoadDone(true)
+      }
     }).catch(e => {
         console.error("Failed to load saved routes:", e)
         setIsInitialLoadDone(true)
@@ -741,6 +781,17 @@ export function MainView() {
       setRoutesResult(result)
     }
   }, [result, isInitialLoadDone])
+
+  const handleRestoreChoice = (choice: 'restore' | 'fresh') => {
+    if (choice === 'restore' && savedResultToRestore) {
+      setResult(savedResultToRestore)
+    } else {
+      setResult(null)
+      import('@/lib/sessionStore').then(m => m.setRoutesResult(null))
+    }
+    setSavedResultToRestore(null)
+    setIsInitialLoadDone(true)
+  }
 
   // Drag state
   const [dragSrc, setDragSrc] = useState<DragSrc | null>(null)
@@ -1068,6 +1119,14 @@ export function MainView() {
           )}
         </div>
       </header>
+
+      {/* Restore dialog */}
+      {savedResultToRestore && (
+        <RestoreDialog
+          onRestore={() => handleRestoreChoice('restore')}
+          onFresh={() => handleRestoreChoice('fresh')}
+        />
+      )}
 
       {/* Customer manager modal */}
       {showCustomers && <CustomerManager onClose={() => setShowCustomers(false)} />}
