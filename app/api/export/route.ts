@@ -22,38 +22,40 @@ export async function POST(req: NextRequest) {
   // ── Summary sheet ──────────────────────────────────────────────────────────
   const sum = wb.addWorksheet('סיכום', { views: [{ rightToLeft: true }] })
   sum.columns = [
-    { key: 'name',     width: 18 },
-    { key: 'dir',      width: 8  },
-    { key: 'stops',    width: 10 },
-    { key: 'trays',    width: 10 },
-    { key: 'carriers', width: 10 },
-    { key: 'boxes',    width: 10 },
-    { key: 'carts',    width: 10 },
-    { key: 'pcarts',   width: 14 },
-    { key: 'km',       width: 10 },
+    { key: 'name',       width: 18 },
+    { key: 'dir',        width: 8  },
+    { key: 'stops',      width: 10 },
+    { key: 'trays',      width: 10 },
+    { key: 'carriers',   width: 10 },
+    { key: 'boxes',      width: 10 },
+    { key: 'packages_h', width: 14 },
+    { key: 'carts',      width: 10 },
+    { key: 'pcarts',     width: 14 },
+    { key: 'km',         width: 10 },
   ]
 
   // Title row
-  const titleRow = sum.addRow([`קווי הובלה — ${date}`, '', '', '', '', '', '', '', ''])
+  const titleRow = sum.addRow([`קווי הובלה — ${date}`, '', '', '', '', '', '', '', '', ''])
   titleRow.getCell(1).font = { bold: true, size: 16, color: { argb: AMBER } }
-  sum.mergeCells('A1:I1')
+  sum.mergeCells('A1:J1')
   titleRow.height = 28
   sum.addRow([])
 
   // Header
-  const hRow = sum.addRow(['קו', 'כיוון', 'עצירות', 'מגשים', 'מנשאים', 'ארגזים', 'עגלות לחלוקה', 'עגלות לאיסוף', 'ק"מ'])
+  const hRow = sum.addRow(['קו', 'כיוון', 'עצירות', 'מגשים', 'מנשאים', 'ארגזים', 'אריזות ח.ריבוי', 'עגלות לחלוקה', 'עגלות לאיסוף', 'ק"מ'])
   hRow.eachCell(c => {
     c.font = { bold: true }
     c.alignment = { horizontal: 'center', readingOrder: 'rtl' }
   })
 
   routes.forEach(r => {
-    const traysSum    = sumField(r, 'trays')
-    const carriersSum = sumField(r, 'carriers')
-    const boxesSum    = sumField(r, 'boxes')
+    const traysSum      = sumField(r, 'trays')
+    const carriersSum   = sumField(r, 'carriers')
+    const boxesSum      = sumField(r, 'boxes')
+    const packages_hSum = sumField(r, 'packages_h')
     const row = sum.addRow([
       r.name, r.direction, r.stops.length,
-      traysSum    || '', carriersSum || '', boxesSum || '',
+      traysSum || '', carriersSum || '', boxesSum || '', packages_hSum || '',
       r.total_carts, getRoutePickupCarts(r), r.distance_km,
     ])
     row.eachCell(c => { c.alignment = { horizontal: 'center' } })
@@ -66,9 +68,10 @@ export async function POST(req: NextRequest) {
     `סה"כ: ${routes.length} קווים`,
     '',
     routes.reduce((a, r) => a + r.stops.length, 0),
-    routes.reduce((a, r) => a + sumField(r, 'trays'), 0)    || '',
-    routes.reduce((a, r) => a + sumField(r, 'carriers'), 0) || '',
-    routes.reduce((a, r) => a + sumField(r, 'boxes'), 0)    || '',
+    routes.reduce((a, r) => a + sumField(r, 'trays'), 0)      || '',
+    routes.reduce((a, r) => a + sumField(r, 'carriers'), 0)   || '',
+    routes.reduce((a, r) => a + sumField(r, 'boxes'), 0)      || '',
+    routes.reduce((a, r) => a + sumField(r, 'packages_h'), 0) || '',
     routes.reduce((a, r) => a + r.total_carts, 0),
     routes.reduce((a, r) => a + getRoutePickupCarts(r), 0),
     routes.reduce((a, r) => a + r.distance_km, 0).toFixed(1),
@@ -125,7 +128,7 @@ export async function POST(req: NextRequest) {
       }
 
       const row = ws.addRow([
-        s.order,
+        s.cart_number || '',
         s.name,
         s.address,
         (s as any).trays || '',

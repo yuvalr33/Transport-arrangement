@@ -134,9 +134,9 @@ export function MapView({
           s => s.notes && (s.notes.includes('חובה') || s.notes.includes('מזומן'))
         )
 
-        // Always show the stop ORDER number as main badge (consistent, not confusing)
+        // Always show the cart number if available, otherwise blank
         // For multi-stop locations, add a small corner count badge
-        const orderLabel = `${first.order}`
+        const orderLabel = `${first.cart_number || ''}`
         const size = 26
 
         const cornerBadge = multi

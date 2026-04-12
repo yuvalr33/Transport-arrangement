@@ -36,12 +36,16 @@ export function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
   let colCarriers: number | undefined
   let colBoxes: number | undefined
   let colPackagesH: number | undefined
+  let colCartNum: number | undefined
 
   headers.forEach((h, i) => {
+    const hClean = h.replace(/['"\s`_.-]/g, '')
+    if (colCartNum === undefined && (hClean.includes('מסעגלה') || hClean.includes('מספרעגלה'))) colCartNum = i
+    else if (col.carts === undefined && /עגלה|עגלות|cart|^כמות$|^qty$|^quantity$/i.test(h)) col.carts = i
+
     if (col.code === undefined && /קוד|code|מזהה|id/.test(h)) col.code = i
     if (col.name === undefined && /שם|name|לקוח|customer/.test(h)) col.name = i
     if (col.address === undefined && /כתובת|address|רחוב/.test(h)) col.address = i
-    if (col.carts === undefined && /עגלה|עגלות|cart|^כמות$|^qty$|^quantity$/i.test(h)) col.carts = i
     if (col.from === undefined && /החל|from|time_from|מ.?שעה|משעה/.test(h)) col.from = i
     if (col.to === undefined && /עד.?שעה|time_to|until|לשעה/.test(h)) col.to = i
     if (col.notes === undefined && /הערה|note|הערות/.test(h)) col.notes = i
@@ -104,6 +108,7 @@ export function parseExcel(buffer: ArrayBuffer): ParsedRow[] {
       carriers: parsePkgStr(colCarriers),
       boxes: parsePkgStr(colBoxes),
       packages_h: parsePkgStr(colPackagesH),
+      cart_number: colCartNum !== undefined ? clean(row[colCartNum]) : '',
       time_from: col.from !== undefined ? parseTime(row[col.from]) : '',
       time_to: col.to !== undefined ? parseTime(row[col.to]) : '',
       notes: col.notes !== undefined ? clean(row[col.notes]) : '',

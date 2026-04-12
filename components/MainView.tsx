@@ -113,7 +113,7 @@ function ColumnsView({
                         {/* Order badge */}
                         <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 mt-0.5"
                           style={{ background: route.color + '30', color: route.color }}>
-                          {s.order}
+                          {s.cart_number || ''}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-bold text-[11px] truncate text-slate-200">{s.name}</div>
@@ -509,7 +509,7 @@ function StopLine({ icon, label, muted }: { icon: string; label: string; muted?:
 // ─── Route card in sidebar ─────────────────────────────────────────────────────
 function RouteCard({
   route, open, active, onToggle,
-  dragSrc, onDragStart, onDragOver, onDrop, onDragEnd, onDeleteStop, dragOverInfo,
+  dragSrc, onDragStart, onDragOver, onDrop, onDragEnd, onDeleteStop, onDeletePickup, dragOverInfo,
 }: {
   route: Route; open: boolean; active: boolean; onToggle: () => void
   dragSrc: DragSrc | null
@@ -518,6 +518,7 @@ function RouteCard({
   onDrop: (type: 'stop' | 'pickup', toRouteId: number, toIndex: number) => void
   onDragEnd: () => void
   onDeleteStop: (routeId: number, stopIdx: number) => void
+  onDeletePickup: (routeId: number, pickupIdx: number) => void
   dragOverInfo: { type: 'stop' | 'pickup'; routeId: number; index: number } | null
 }) {
   const pct = Math.min(100, (route.total_carts / 18) * 100)
@@ -611,7 +612,7 @@ function RouteCard({
                     className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5"
                     style={{ background: route.color + '30', color: route.color }}
                   >
-                    {s.order}
+                    {s.cart_number || ''}
                   </div>
 
                   <div className="flex-1 min-w-0 text-xs">
@@ -709,6 +710,15 @@ function RouteCard({
                         <div className="text-slate-600 truncate text-[10px]">📍 {p.address_text}</div>
                         {p.phone && <div className="text-blue-500/60 text-[10px]">📞 {p.phone}</div>}
                       </div>
+
+                      {/* Delete button — visible on hover */}
+                      <button
+                        onClick={e => { e.stopPropagation(); onDeletePickup(route.id, i) }}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-red-400 text-xs px-1 pt-0.5"
+                        title="מחק איסוף מסידור זה"
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
                 )
@@ -951,6 +961,23 @@ export function MainView() {
     })
   }, [])
 
+  // ── Delete a pickup from a route ──────────────────────────────────────────
+  const handleDeletePickup = useCallback((routeId: number, pickupIdx: number) => {
+    setResult(prev => {
+      if (!prev) return prev
+      const routes = prev.routes.map(r => ({ ...r, pickups: r.pickups ? r.pickups.map(p => ({ ...p })) : [] }))
+      const route = routes.find(r => r.id === routeId)
+      if (!route) return prev
+      route.pickups.splice(pickupIdx, 1)
+      
+      const finalRoutes = routes.filter(r => r.stops.length > 0 || (r.pickups && r.pickups.length > 0))
+      return {
+        ...prev,
+        routes: finalRoutes,
+      }
+    })
+  }, [])
+
   // ── File upload → parse only, advance to review ──────────────────────────────
   const handleFile = useCallback(async (file: File) => {
     // NOTE: do NOT clear result here — we keep it so the user can choose merge vs fresh
@@ -986,6 +1013,50 @@ export function MainView() {
     // Re-route always goes fresh — bypasses merge dialog
     await doBuildRoutes(stops, numTrucks)
   }, [result, numTrucks, doBuildRoutes])
+
+  // ── Insert Pickups ONLY into existing routes ──────────────────────────────────
+  const handleInsertPickups = useCallback(async () => {
+    if (!result) return
+    setLoading(true)
+    setError('')
+    try {
+      const pickupsList = await getAllPickupRecords()
+      const selectedIds = await getSelectedPickupIdsArray()
+      
+      const newRoutes = result.routes.map(r => ({ ...r, pickups: [] as any[] }))
+
+      // Only assign selected pickups that have lat/lng
+      for (const p of pickupsList) {
+        if (!selectedIds.includes(p.id)) continue;
+        if (!p.lat || !p.lng) continue;
+        
+        let bestR = newRoutes[0]
+        let bestDist = Infinity
+        
+        for (const route of newRoutes) {
+          let minDist = Infinity
+          for (const s of route.stops) {
+            if (!s.lat || !s.lng) continue
+            const d = haversine(p.lat, p.lng, s.lat, s.lng)
+            if (d < minDist) minDist = d
+          }
+          if (minDist < bestDist) {
+            bestDist = minDist
+            bestR = route
+          }
+        }
+        if (bestR) {
+          bestR.pickups.push(p)
+        }
+      }
+
+      setResult({ ...result, routes: newRoutes })
+    } catch(e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [result])
 
   const handleExport = async () => {
     if (!result) return
@@ -1232,6 +1303,20 @@ export function MainView() {
                       {loading ? '⏳ מסדר...' : '🔄 סדר קווים מחדש'}
                     </button>
 
+                    {/* Insert Pickups ONLY button */}
+                    <button
+                      className="w-full text-sm font-bold py-2 rounded-xl border-2 transition-all"
+                      disabled={loading}
+                      onClick={handleInsertPickups}
+                      style={{
+                        background: loading ? '#1e2d45' : 'linear-gradient(135deg,#8b5cf618,#8b5cf608)',
+                        color: loading ? '#475569' : '#a78bfa',
+                        borderColor: loading ? '#1e2d45' : '#8b5cf640',
+                      }}
+                    >
+                      {loading ? '⏳ מסדר איסופים...' : '↩ הכנס איסופים'}
+                    </button>
+
                     {/* Export */}
                     <button className="btn-primary w-full" onClick={handleExport} disabled={exporting}>
                       {exporting ? '⏳ מייצא...' : '📥 ייצוא Excel לנהגים'}
@@ -1292,6 +1377,7 @@ export function MainView() {
                         onDrop={handleDrop}
                         onDragEnd={handleDragEnd}
                         onDeleteStop={handleDeleteStop}
+                        onDeletePickup={handleDeletePickup}
                       />
                     ))}
                   </>
