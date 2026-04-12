@@ -129,7 +129,7 @@ export function MapView({
       locationMap.forEach((stopsAtLoc, _key) => {
         const first = stopsAtLoc[0]
         const multi = stopsAtLoc.length > 1
-        const totalCartsSite = stopsAtLoc.reduce((a, s) => a + s.carts, 0)
+        const totalCartsSite = stopsAtLoc.reduce((a, s) => a + Number(s.carts), 0)
         const hasWarn = stopsAtLoc.some(
           s => s.notes && (s.notes.includes('חובה') || s.notes.includes('מזומן'))
         )

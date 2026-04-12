@@ -1,2 +1,2 @@
-import { MainView } from '@/components/MainView.tsx'
+import { MainView } from '@/components/MainView'
 export default function Home() { return <MainView /> }
