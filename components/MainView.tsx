@@ -6,7 +6,7 @@ import { ReviewScreen } from './ReviewScreen'
 import { CustomerManager } from './CustomerManager'
 import { PickupsManager } from './PickupsManager'
 import { getAllPickupRecords } from '@/lib/pickupDb'
-import { getSelectedPickupIdsArray } from '@/lib/sessionStore'
+import { getSelectedPickupIdsArray, getRoutesResult, setRoutesResult } from '@/lib/sessionStore'
 
 // ─── Columns (board) view ─────────────────────────────────────────────────────
 function ColumnsView({
@@ -710,6 +710,7 @@ export function MainView() {
   const [viewMode, setViewMode] = useState<'map' | 'columns'>('map')
   const [showCustomers, setShowCustomers] = useState(false)
   const [showPickups, setShowPickups] = useState(false)
+  const [isInitialLoadDone, setIsInitialLoadDone] = useState(false)
 
   // ── Merge dialog state ─────────────────────────────────────────────────────────────
   const [pendingStops, setPendingStops] = useState<any[] | null>(null)
@@ -722,6 +723,24 @@ export function MainView() {
   useEffect(() => { resultRef.current = result }, [result])
   // ref for the hidden file input used when result already exists
   const reuploadRef = useRef<HTMLInputElement>(null)
+
+  // Load from Supabase on mount
+  useEffect(() => {
+    getRoutesResult().then(r => {
+      if (r) setResult(r)
+      setIsInitialLoadDone(true)
+    }).catch(e => {
+        console.error("Failed to load saved routes:", e)
+        setIsInitialLoadDone(true)
+    })
+  }, [])
+
+  // Save to Supabase whenever it changes
+  useEffect(() => {
+    if (isInitialLoadDone) {
+      setRoutesResult(result)
+    }
+  }, [result, isInitialLoadDone])
 
   // Drag state
   const [dragSrc, setDragSrc] = useState<DragSrc | null>(null)

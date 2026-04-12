@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { ReviewEntry } from '@/types'
+import type { ReviewEntry, RoutesResult } from '@/types'
 
 function todayStr(): string { return new Date().toISOString().slice(0, 10) }
 
@@ -17,6 +17,7 @@ export interface SessionData {
     manualEntries: ReviewEntry[]
     entryOverrides: Record<string, EntryOverride>
     selectedPickupIds: string[]
+    routesResult?: RoutesResult
 }
 
 const emptySession = (): SessionData => ({
@@ -35,7 +36,8 @@ export async function loadSession(): Promise<SessionData> {
     return {
         manualEntries: data.data.manualEntries || [],
         entryOverrides: data.data.entryOverrides || {},
-        selectedPickupIds: data.data.selectedPickupIds || []
+        selectedPickupIds: data.data.selectedPickupIds || [],
+        routesResult: data.data.routesResult
     }
 }
 
@@ -144,4 +146,15 @@ export async function isPickupSelected(id: string): Promise<boolean> {
 
 export async function getSelectedPickupIdsArray(): Promise<string[]> {
     return (await loadSession()).selectedPickupIds
+}
+
+export async function getRoutesResult(): Promise<RoutesResult | undefined> {
+    return (await loadSession()).routesResult
+}
+
+export async function setRoutesResult(routes: RoutesResult | null) {
+    const s = await loadSession()
+    if (!routes) delete s.routesResult
+    else s.routesResult = routes
+    await saveSession(s)
 }
