@@ -14,6 +14,7 @@ import { MapPicker } from './MapPicker'
 interface ParsedRow {
     code: string; name: string; carts: number | string
     trays?: number | string; carriers?: number | string; boxes?: number | string; packages_h?: number | string
+    cart_number?: string
     time_from: string; time_to: string; notes: string; address: string
 }
 
@@ -53,6 +54,7 @@ async function buildEntries(rows: ParsedRow[]): Promise<ReviewEntry[]> {
             carriers: row.carriers,
             boxes: row.boxes,
             packages_h: row.packages_h,
+            cart_number: row.cart_number,
             time_from: row.time_from,
             time_to: row.time_to,
             notes: row.notes,
@@ -76,6 +78,7 @@ function entryToStop(e: ReviewEntry): Stop {
         carriers: e.carriers,
         boxes: e.boxes,
         packages_h: e.packages_h,
+        cart_number: e.cart_number,
         time_from: e.time_from,
         time_to: e.time_to,
         notes: e.notes,
@@ -117,9 +120,11 @@ function EntryCard({ entry, onPickAddress, onSelectAddress, onRemove, onFieldCha
             {/* Main row */}
             <div className="flex items-center gap-3 px-3 py-2.5">
                 <div
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    className={`rounded-full shrink-0 flex items-center justify-center font-black ${entry.cart_number ? 'w-6 h-6 text-[10px] text-white border border-white/20' : 'w-2.5 h-2.5'}`}
                     style={{ background: entry.needsAddress ? '#ef4444' : entry.isManual ? '#f59e0b' : '#10b981' }}
-                />
+                >
+                    {entry.cart_number || ''}
+                </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="font-bold text-sm text-slate-200 truncate">{entry.name || '—'}</span>
