@@ -89,7 +89,7 @@ function partitionByAngle(stops: Stop[], K: number): Stop[][] {
   K = Math.max(1, K)
 
   const sorted = [...stops].sort((a, b) => angleDeg(a) - angleDeg(b))
-  const totalCarts = sorted.reduce((a, s) => a + Number(s.carts), 0)
+  const totalCarts = Math.round(sorted.reduce((a, s) => a + Number(s.carts), 0) * 10) / 10
   const target = totalCarts / K          // ideal load per bucket
 
   const groups: Stop[][] = [[]]
@@ -97,7 +97,7 @@ function partitionByAngle(stops: Stop[], K: number): Stop[][] {
   let slotsLeft = K
 
   for (const stop of sorted) {
-    const wouldOverflow = load + Number(stop.carts) > MAX_CARTS
+    const wouldOverflow = Math.round((load + Number(stop.carts)) * 10) / 10 > MAX_CARTS
     const hitTarget = load >= target && slotsLeft > 1
 
     if (wouldOverflow || hitTarget) {
@@ -106,10 +106,10 @@ function partitionByAngle(stops: Stop[], K: number): Stop[][] {
       slotsLeft = Math.max(1, slotsLeft - 1)
     }
     // Safety: still overflow on a fresh bucket (single stop > 18 carts – rare)
-    if (load + Number(stop.carts) > MAX_CARTS) { groups.push([]); load = 0 }
+    if (Math.round((load + Number(stop.carts)) * 10) / 10 > MAX_CARTS) { groups.push([]); load = 0 }
 
     groups[groups.length - 1].push(stop)
-    load += Number(stop.carts)
+    load = Math.round((load + Number(stop.carts)) * 10) / 10
   }
 
   return groups.filter(g => g.length > 0)
@@ -136,9 +136,9 @@ function mergeUnderloaded(trucks: Truck[]): Truck[] {
       const a = trucks[i], b = trucks[i + 1]
       // Never merge north and south routes
       if (a.dir !== b.dir) continue
-      if (a.load + b.load > MAX_CARTS) continue
+      if (Math.round((a.load + b.load) * 10) / 10 > MAX_CARTS) continue
 
-      trucks[i] = { stops: [...a.stops, ...b.stops], load: a.load + b.load, dir: a.dir }
+      trucks[i] = { stops: [...a.stops, ...b.stops], load: Math.round((a.load + b.load) * 10) / 10, dir: a.dir }
       trucks.splice(i + 1, 1)
       changed = true
       break
@@ -159,9 +159,9 @@ export function buildRoutes(stops: Stop[], numTrucks: number): Route[] {
   const northStops = withCoords.filter(isNorthStop)
   const southStops = withCoords.filter(s => !isNorthStop(s))
 
-  const totalCarts = stops.reduce((a, s) => a + Number(s.carts), 0)
-  const northCarts = northStops.reduce((a, s) => a + Number(s.carts), 0)
-  const southCarts = southStops.reduce((a, s) => a + Number(s.carts), 0)
+  const totalCarts = Math.round(stops.reduce((a, s) => a + Number(s.carts), 0) * 10) / 10
+  const northCarts = Math.round(northStops.reduce((a, s) => a + Number(s.carts), 0) * 10) / 10
+  const southCarts = Math.round(southStops.reduce((a, s) => a + Number(s.carts), 0) * 10) / 10
 
   // Minimum trucks forced by capacity
   const minNeeded = Math.max(1, Math.ceil(totalCarts / MAX_CARTS))
@@ -179,7 +179,7 @@ export function buildRoutes(stops: Stop[], numTrucks: number): Route[] {
   const southGroups = partitionByAngle(southStops, kSouth)
 
   const toTruck = (g: Stop[], dir: 'צפון' | 'דרום'): Truck =>
-    ({ stops: g, load: g.reduce((a, s) => a + Number(s.carts), 0), dir })
+    ({ stops: g, load: Math.round(g.reduce((a, s) => a + Number(s.carts), 0) * 10) / 10, dir })
 
   let trucks: Truck[] = [
     ...northGroups.map(g => toTruck(g, 'צפון')),
@@ -189,10 +189,10 @@ export function buildRoutes(stops: Stop[], numTrucks: number): Route[] {
   // ── Step 3: assign no-coord stops to best-fitting truck ──────────────────
   for (const stop of noCoords) {
     const best = trucks
-      .filter(t => t.load + Number(stop.carts) <= MAX_CARTS)
+      .filter(t => Math.round((t.load + Number(stop.carts)) * 10) / 10 <= MAX_CARTS)
       .sort((a, b) => b.load - a.load)[0]
-    if (best) { best.stops.push(stop); best.load += Number(stop.carts) }
-    else { trucks.push({ stops: [stop], load: Number(stop.carts), dir: 'דרום' }) }
+    if (best) { best.stops.push(stop); best.load = Math.round((best.load + Number(stop.carts)) * 10) / 10 }
+    else { trucks.push({ stops: [stop], load: Math.round(Number(stop.carts) * 10) / 10, dir: 'דרום' }) }
   }
 
   // ── Step 4: merge under-loaded adjacent routes (north and south separately)

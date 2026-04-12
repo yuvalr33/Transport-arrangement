@@ -848,8 +848,8 @@ export function MainView() {
         // Renumber and recalculate
         from.stops.forEach((s, i) => { s.order = i + 1 })
         to.stops.forEach((s, i) => { s.order = i + 1 })
-        from.total_carts = from.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
-        to.total_carts = to.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+        from.total_carts = Math.round(from.stops.reduce((a, s) => a + Number(s.carts || 0), 0) * 10) / 10
+        to.total_carts = Math.round(to.stops.reduce((a, s) => a + Number(s.carts || 0), 0) * 10) / 10
         from.distance_km = calcKm(from.stops)
         to.distance_km = calcKm(to.stops)
       } else {
@@ -862,7 +862,7 @@ export function MainView() {
       return {
         ...prev,
         routes: finalRoutes,
-        total_carts: finalRoutes.reduce((a, r) => a + r.total_carts, 0),
+        total_carts: Math.round(finalRoutes.reduce((a, r) => a + r.total_carts, 0) * 10) / 10,
         total_customers: finalRoutes.reduce((a, r) => a + r.stops.length, 0),
       }
     })
@@ -930,7 +930,7 @@ export function MainView() {
       setResult({
         ...existing,
         routes,
-        total_carts: routes.reduce((a, r) => a + r.total_carts, 0),
+        total_carts: Math.round(routes.reduce((a, r) => a + r.total_carts, 0) * 10) / 10,
         total_customers: routes.reduce((a, r) => a + r.stops.length, 0),
       })
       setReviewRows(null)
@@ -948,14 +948,14 @@ export function MainView() {
       if (!route) return prev
       route.stops.splice(stopIdx, 1)
       route.stops.forEach((s, i) => { s.order = i + 1 })
-      route.total_carts = route.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+      route.total_carts = Math.round(route.stops.reduce((a, s) => a + Number(s.carts || 0), 0) * 10) / 10
       route.distance_km = calcKm(route.stops)
       // Remove empty routes
       const finalRoutes = routes.filter(r => r.stops.length > 0)
       return {
         ...prev,
         routes: finalRoutes,
-        total_carts: finalRoutes.reduce((a, r) => a + r.total_carts, 0),
+        total_carts: Math.round(finalRoutes.reduce((a, r) => a + r.total_carts, 0) * 10) / 10,
         total_customers: finalRoutes.reduce((a, r) => a + r.stops.length, 0),
       }
     })

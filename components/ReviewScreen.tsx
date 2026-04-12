@@ -98,6 +98,96 @@ function TimeTag({ label, val }: { label: string; val: string }) {
     )
 }
 
+function ManualEntryModal({ onClose, onSave }: { onClose: () => void, onSave: (data: Partial<ReviewEntry>) => void }) {
+    const [data, setData] = useState<Partial<ReviewEntry>>({
+        name: '', carts: 0, time_from: '', time_to: '', notes: '',
+        trays: '', carriers: '', boxes: '', packages_h: '', cart_number: ''
+    })
+
+    return (
+        <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 dir-rtl" dir="rtl">
+            <div className="bg-[#0f1d30] border border-[#1e2d45] rounded-2xl w-full max-w-md overflow-hidden flex flex-col shadow-2xl">
+                <div className="px-5 py-4 border-b border-[#1e2d45] flex justify-between items-center bg-[#0a1525]">
+                    <h2 className="font-black text-lg text-slate-200 flex items-center gap-2">
+                        <span>➕</span> הוספת מסירה ידנית
+                    </h2>
+                    <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">✕</button>
+                </div>
+                
+                <div className="p-5 overflow-y-auto max-h-[70vh] space-y-4">
+                    <div>
+                        <label className="text-xs text-slate-400 block mb-1.5 font-semibold">שם הלקוח / יעד *</label>
+                        <input autoFocus value={data.name} onChange={e => setData(p => ({ ...p, name: e.target.value }))}
+                            className="input w-full" placeholder="הכנס שם..." />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">מס' עגלה (סידורי)</label>
+                            <input value={data.cart_number || ''} onChange={e => setData(p => ({ ...p, cart_number: e.target.value }))}
+                                className="input w-full" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">עגלות לחלוקה</label>
+                            <input type="number" min={0} max={18} value={data.carts || 0} onChange={e => setData(p => ({ ...p, carts: parseInt(e.target.value) || 0 }))}
+                                className="input w-full text-center" />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">מגשים</label>
+                            <input value={data.trays || ''} onChange={e => setData(p => ({ ...p, trays: e.target.value }))} className="input w-full" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">מנשאים</label>
+                            <input value={data.carriers || ''} onChange={e => setData(p => ({ ...p, carriers: e.target.value }))} className="input w-full" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">ארגזים</label>
+                            <input value={data.boxes || ''} onChange={e => setData(p => ({ ...p, boxes: e.target.value }))} className="input w-full" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">חומר ריבוי</label>
+                            <input value={data.packages_h || ''} onChange={e => setData(p => ({ ...p, packages_h: e.target.value }))} className="input w-full" />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">החל משעה</label>
+                            <input type="time" value={data.time_from || ''} onChange={e => setData(p => ({ ...p, time_from: e.target.value }))} className="input w-full" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1.5 font-semibold">עד שעה</label>
+                            <input type="time" value={data.time_to || ''} onChange={e => setData(p => ({ ...p, time_to: e.target.value }))} className="input w-full" />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="text-xs text-slate-400 block mb-1.5 font-semibold">הערות</label>
+                        <input value={data.notes || ''} onChange={e => setData(p => ({ ...p, notes: e.target.value }))}
+                            className="input w-full" placeholder="הערות חשובות לנהג..." />
+                    </div>
+                </div>
+
+                <div className="p-4 border-t border-[#1e2d45] flex gap-3 bg-[#0a1525]">
+                    <button className="btn-ghost flex-1" onClick={onClose}>ביטול</button>
+                    <button 
+                        className="btn-primary flex-1 disabled:opacity-50" 
+                        disabled={!data.name}
+                        onClick={() => {
+                            if (data.name) onSave(data)
+                        }}
+                    >
+                        שמור נקודה
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 interface EntryCardProps {
     entry: ReviewEntry
     onPickAddress: (entry: ReviewEntry) => void
@@ -313,6 +403,7 @@ interface Props {
 export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumTrucks }: Props) {
     const [entries, setEntries] = useState<ReviewEntry[]>([])
     const [pickerFor, setPickerFor] = useState<ReviewEntry | null>(null)
+    const [showManualModal, setShowManualModal] = useState(false)
     const listRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -365,15 +456,27 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
         }, 100)
     }
 
-    const handleAddManual = async () => {
+    const handleSaveManual = async (data: Partial<ReviewEntry>) => {
         const code = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
         const entry: ReviewEntry = {
-            code, name: '', carts: 0, time_from: '', time_to: '', notes: '',
+            code,
+            name: data.name || '',
+            carts: data.carts || 0,
+            trays: data.trays || '',
+            carriers: data.carriers || '',
+            boxes: data.boxes || '',
+            packages_h: data.packages_h || '',
+            cart_number: data.cart_number || '',
+            time_from: data.time_from || '',
+            time_to: data.time_to || '',
+            notes: data.notes || '',
             lat: null, lng: null, address_text: '', address_label: '',
             isKnown: false, needsAddress: true, isManual: true, availableAddresses: [],
         }
         await upsertManualEntry(entry)
         setEntries(prev => [...prev, entry])
+        setShowManualModal(false)
+        setPickerFor(entry) // immediately open map picker for address
     }
 
     const handleRemoveManual = async (code: string) => {
@@ -507,7 +610,7 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
 
                     {/* Footer */}
                     <div className="p-3 border-t border-border space-y-2">
-                        <button className="btn-ghost w-full text-sm" onClick={handleAddManual}>
+                        <button className="btn-ghost w-full text-sm" onClick={() => setShowManualModal(true)}>
                             ➕ הוסף נקודה ידנית
                         </button>
 
@@ -549,6 +652,14 @@ export function ReviewScreen({ rows, onCancel, onBuildRoutes, numTrucks, setNumT
                     initialLng={pickerFor.lng ?? undefined}
                     onConfirm={handleConfirmPicker}
                     onClose={() => setPickerFor(null)}
+                />
+            )}
+
+            {/* Manual entry creator modal */}
+            {showManualModal && (
+                <ManualEntryModal 
+                    onClose={() => setShowManualModal(false)}
+                    onSave={handleSaveManual}
                 />
             )}
         </div>

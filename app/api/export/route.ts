@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     routes.reduce((a, r) => a + sumField(r, 'carriers'), 0)   || '',
     routes.reduce((a, r) => a + sumField(r, 'boxes'), 0)      || '',
     routes.reduce((a, r) => a + sumField(r, 'packages_h'), 0) || '',
-    routes.reduce((a, r) => a + r.total_carts, 0),
+    Math.round(routes.reduce((a, r) => a + r.total_carts, 0) * 10) / 10,
     routes.reduce((a, r) => a + getRoutePickupCarts(r), 0),
     routes.reduce((a, r) => a + r.distance_km, 0).toFixed(1),
   ])
