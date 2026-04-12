@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       routes,
       total_customers: stops.length,
-      total_carts: stops.reduce((a, s) => a + Number(s.carts), 0),
+      total_carts: Math.round(stops.reduce((a, s) => a + Number(s.carts), 0) * 10) / 10,
       no_address: noAddress,
       date: new Date().toLocaleDateString('he-IL'),
     })
