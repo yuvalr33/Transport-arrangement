@@ -16,10 +16,10 @@ function ColumnsView({
 }: {
   routes: Route[]
   dragSrc: DragSrc | null
-  dragOverInfo: { routeId: number; stopIdx: number } | null
-  onDragStart: (routeId: number, stopIdx: number) => void
-  onDragOver: (e: React.DragEvent, routeId: number, stopIdx: number) => void
-  onDrop: (toRouteId: number, toStopIdx: number) => void
+  dragOverInfo: { type: 'stop' | 'pickup'; routeId: number; index: number } | null
+  onDragStart: (type: 'stop' | 'pickup', routeId: number, index: number) => void
+  onDragOver: (e: React.DragEvent, type: 'stop' | 'pickup', routeId: number, index: number) => void
+  onDrop: (type: 'stop' | 'pickup', toRouteId: number, toIndex: number) => void
   onDragEnd: () => void
 }) {
   const hasWarn = (s: RouteStop) =>
@@ -43,7 +43,11 @@ function ColumnsView({
               boxShadow: isDraggingOver ? `0 0 20px ${route.color}30` : undefined,
             }}
             onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
-            onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+            onDrop={e => {
+              e.preventDefault();
+              if (dragSrc?.type === 'stop') onDrop('stop', route.id, route.stops.length);
+              if (dragSrc?.type === 'pickup') onDrop('pickup', route.id, route.pickups.length);
+            }}
           >
             {/* Column header */}
             <div className="shrink-0 px-3 pt-3 pb-2"
@@ -81,8 +85,8 @@ function ColumnsView({
               </div>
 
               {route.stops.map((s, i) => {
-                const isBeingDragged = dragSrc?.routeId === route.id && dragSrc?.stopIdx === i
-                const isDropTarget = dragOverInfo?.routeId === route.id && dragOverInfo?.stopIdx === i
+                const isBeingDragged = dragSrc?.type === 'stop' && dragSrc?.routeId === route.id && dragSrc?.index === i
+                const isDropTarget = dragOverInfo?.type === 'stop' && dragOverInfo?.routeId === route.id && dragOverInfo?.index === i
                 const warn = hasWarn(s)
 
                 return (
@@ -93,9 +97,9 @@ function ColumnsView({
                     )}
                     <div
                       draggable
-                      onDragStart={e => { e.stopPropagation(); onDragStart(route.id, i) }}
-                      onDragOver={e => onDragOver(e, route.id, i)}
-                      onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop(route.id, i) }}
+                      onDragStart={e => { e.stopPropagation(); onDragStart('stop', route.id, i) }}
+                      onDragOver={e => onDragOver(e, 'stop', route.id, i)}
+                      onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop('stop', route.id, i) }}
                       onDragEnd={onDragEnd}
                       className="mx-2 mb-1 rounded-xl px-2.5 py-2 transition-all group"
                       style={{
@@ -143,15 +147,15 @@ function ColumnsView({
               })}
 
               {/* Drop zone for cross-route drag */}
-              {dragSrc && dragSrc.routeId !== route.id && (
+              {dragSrc && dragSrc.type === 'stop' && dragSrc.routeId !== route.id && (
                 <div
                   className="mx-2 mb-1 h-8 rounded-xl border border-dashed flex items-center justify-center text-[10px] transition-all"
                   style={{
                     borderColor: isDraggingOver ? route.color : '#1e2d45',
                     color: isDraggingOver ? route.color : '#475569',
                   }}
-                  onDragOver={e => onDragOver(e, route.id, route.stops.length)}
-                  onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+                  onDragOver={e => onDragOver(e, 'stop', route.id, route.stops.length)}
+                  onDrop={e => { e.preventDefault(); onDrop('stop', route.id, route.stops.length) }}
                 >
                   + הוסף לסוף הקו
                 </div>
@@ -163,28 +167,66 @@ function ColumnsView({
               </div>
 
               {/* ── Pickups for this route ── */}
-              {route.pickups?.length > 0 && (
+              {(route.pickups?.length > 0 || (dragSrc && dragSrc.type === 'pickup')) && (
                 <div className="border-t mt-1 pt-1 pb-2" style={{ borderColor: '#8b5cf620' }}>
-                  <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider"
-                    style={{ color: '#a78bfa' }}>
-                    ↩ איסופים ({route.pickups.length})
-                  </div>
-                  {route.pickups.map(p => (
-                    <div key={p.id} className="mx-2 mb-1 px-2.5 py-2 rounded-xl"
-                      style={{ background: '#8b5cf610', border: '1px solid #8b5cf630' }}>
-                      <div className="flex items-start gap-1.5">
-                        <span className="text-purple-400 text-sm shrink-0 mt-0.5">↩</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-bold text-[11px] text-purple-200 truncate">{p.name}</div>
-                          <div className="text-[10px] text-purple-300/70 truncate">📦 {p.what_to_collect}</div>
-                          <div className="text-[9px] text-slate-600 truncate mt-0.5">📍 {p.address_text}</div>
-                          {p.phone && (
-                            <div className="text-[9px] text-blue-400">📞 {p.phone}</div>
-                          )}
+                  {route.pickups?.length > 0 && (
+                    <div className="px-3 py-1 text-[9px] font-bold uppercase tracking-wider"
+                      style={{ color: '#a78bfa' }}>
+                      ↩ איסופים ({route.pickups.length})
+                    </div>
+                  )}
+                  {(route.pickups || []).map((p, i) => {
+                    const isBeingDragged = dragSrc?.type === 'pickup' && dragSrc?.routeId === route.id && dragSrc?.index === i
+                    const isDropTarget = dragOverInfo?.type === 'pickup' && dragOverInfo?.routeId === route.id && dragOverInfo?.index === i
+                    return (
+                      <div key={p.id}>
+                        {isDropTarget && (
+                          <div className="h-0.5 mx-2 my-0.5 rounded-full"
+                            style={{ background: '#a78bfa' }} />
+                        )}
+                        <div
+                          draggable
+                          onDragStart={e => { e.stopPropagation(); onDragStart('pickup', route.id, i) }}
+                          onDragOver={e => onDragOver(e, 'pickup', route.id, i)}
+                          onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop('pickup', route.id, i) }}
+                          onDragEnd={onDragEnd}
+                          className="mx-2 mb-1 px-2.5 py-2 rounded-xl transition-all"
+                          style={{
+                            background: isBeingDragged ? 'transparent' : '#8b5cf610',
+                            border: `1px solid ${isBeingDragged ? 'transparent' : '#8b5cf630'}`,
+                            opacity: isBeingDragged ? 0.3 : 1,
+                            cursor: dragSrc ? 'grabbing' : 'grab',
+                          }}
+                        >
+                          <div className="flex items-start gap-1.5">
+                            <span className="text-purple-400 text-sm shrink-0 mt-0.5">↩</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-bold text-[11px] text-purple-200 truncate">{p.name}</div>
+                              <div className="text-[10px] text-purple-300/70 truncate">📦 {p.what_to_collect}</div>
+                              <div className="text-[9px] text-slate-600 truncate mt-0.5">📍 {p.address_text}</div>
+                              {p.phone && (
+                                <div className="text-[9px] text-blue-400">📞 {p.phone}</div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
+                    )
+                  })}
+                  {/* Drop zone for cross-route pickup drag */}
+                  {dragSrc && dragSrc.type === 'pickup' && dragSrc.routeId !== route.id && (
+                    <div
+                      className="mx-2 mb-1 h-8 rounded-xl border border-dashed flex items-center justify-center text-[10px] transition-all"
+                      style={{
+                        borderColor: dragOverInfo?.type === 'pickup' && dragOverInfo?.routeId === route.id && dragOverInfo?.index === route.pickups.length ? '#a78bfa' : '#1e2d45',
+                        color: dragOverInfo?.type === 'pickup' && dragOverInfo?.routeId === route.id && dragOverInfo?.index === route.pickups.length ? '#a78bfa' : '#475569',
+                      }}
+                      onDragOver={e => onDragOver(e, 'pickup', route.id, route.pickups.length)}
+                      onDrop={e => { e.preventDefault(); onDrop('pickup', route.id, route.pickups.length) }}
+                    >
+                      + הוסף לסוף האיסופים
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
@@ -291,7 +333,7 @@ function mergeIntoExistingRoutes(
 }
 
 // ─── Drag state types ─────────────────────────────────────────────────────────
-interface DragSrc { routeId: number; stopIdx: number }
+interface DragSrc { type: 'stop' | 'pickup'; routeId: number; index: number }
 
 // ─── Upload Zone ──────────────────────────────────────────────────────────────
 function UploadZone({ onFile, loading }: { onFile: (f: File) => void; loading: boolean }) {
@@ -436,12 +478,12 @@ function RouteCard({
 }: {
   route: Route; open: boolean; active: boolean; onToggle: () => void
   dragSrc: DragSrc | null
-  onDragStart: (routeId: number, stopIdx: number) => void
-  onDragOver: (e: React.DragEvent, routeId: number, stopIdx: number) => void
-  onDrop: (toRouteId: number, toStopIdx: number) => void
+  onDragStart: (type: 'stop' | 'pickup', routeId: number, index: number) => void
+  onDragOver: (e: React.DragEvent, type: 'stop' | 'pickup', routeId: number, index: number) => void
+  onDrop: (type: 'stop' | 'pickup', toRouteId: number, toIndex: number) => void
   onDragEnd: () => void
   onDeleteStop: (routeId: number, stopIdx: number) => void
-  dragOverInfo: { routeId: number; stopIdx: number } | null
+  dragOverInfo: { type: 'stop' | 'pickup'; routeId: number; index: number } | null
 }) {
   const pct = Math.min(100, (route.total_carts / 18) * 100)
   const hasWarn = (s: RouteStop) =>
@@ -459,7 +501,11 @@ function RouteCard({
       }}
       // Drop onto route header = add to end
       onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
-      onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+      onDrop={e => {
+        e.preventDefault();
+        if (dragSrc?.type === 'stop') onDrop('stop', route.id, route.stops.length);
+        if (dragSrc?.type === 'pickup') onDrop('pickup', route.id, route.pickups.length);
+      }}
     >
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onToggle}>
@@ -495,8 +541,8 @@ function RouteCard({
           <StopLine icon="🏠" label="מושב חגלה — יציאה" muted />
 
           {route.stops.map((s, i) => {
-            const isBeingDragged = dragSrc?.routeId === route.id && dragSrc?.stopIdx === i
-            const isDropTarget = dragOverInfo?.routeId === route.id && dragOverInfo?.stopIdx === i
+            const isBeingDragged = dragSrc?.type === 'stop' && dragSrc?.routeId === route.id && dragSrc?.index === i
+            const isDropTarget = dragOverInfo?.type === 'stop' && dragOverInfo?.routeId === route.id && dragOverInfo?.index === i
 
             return (
               <div key={i}>
@@ -508,9 +554,9 @@ function RouteCard({
 
                 <div
                   draggable
-                  onDragStart={e => { e.stopPropagation(); onDragStart(route.id, i) }}
-                  onDragOver={e => onDragOver(e, route.id, i)}
-                  onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop(route.id, i) }}
+                  onDragStart={e => { e.stopPropagation(); onDragStart('stop', route.id, i) }}
+                  onDragOver={e => onDragOver(e, 'stop', route.id, i)}
+                  onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop('stop', route.id, i) }}
                   onDragEnd={onDragEnd}
                   className={`
                     flex items-start gap-2.5 py-1.5 border-b border-white/5 last:border-0
@@ -572,11 +618,11 @@ function RouteCard({
           })}
 
           {/* Drop zone at the end of the list */}
-          {dragSrc && dragSrc.routeId !== route.id && (
+          {dragSrc && dragSrc.type === 'stop' && dragSrc.routeId !== route.id && (
             <div
               className="h-6 rounded-lg border border-dashed border-white/10 mt-1 flex items-center justify-center text-[10px] text-slate-600 hover:border-white/30 hover:text-slate-400 transition-all"
-              onDragOver={e => onDragOver(e, route.id, route.stops.length)}
-              onDrop={e => { e.preventDefault(); onDrop(route.id, route.stops.length) }}
+              onDragOver={e => onDragOver(e, 'stop', route.id, route.stops.length)}
+              onDrop={e => { e.preventDefault(); onDrop('stop', route.id, route.stops.length) }}
             >
               + הוסף לסוף הקו
             </div>
@@ -585,27 +631,63 @@ function RouteCard({
           <StopLine icon="🏠" label="מושב חגלה — חזרה" muted />
 
           {/* ── Pickups for this route ── */}
-          {route.pickups?.length > 0 && (
+          {(route.pickups?.length > 0 || (dragSrc && dragSrc.type === 'pickup')) && (
             <div className="mt-2 pt-2 border-t" style={{ borderColor: '#8b5cf620' }}>
-              <div className="text-[9px] font-bold uppercase tracking-wider mb-1.5 px-0.5"
-                style={{ color: '#a78bfa' }}>
-                ↩ איסופים ({route.pickups.length})
-              </div>
-              {route.pickups.map(p => (
-                <div key={p.id}
-                  className="flex items-start gap-2 py-1.5 border-b border-white/5 last:border-0"
-                  style={{ borderColor: '#8b5cf615' }}
-                >
-                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0 mt-0.5"
-                    style={{ background: '#8b5cf625', color: '#a78bfa' }}>↩</div>
-                  <div className="flex-1 min-w-0 text-xs">
-                    <div className="font-semibold truncate" style={{ color: '#c4b5fd' }}>{p.name}</div>
-                    <div className="truncate mt-0.5" style={{ color: '#7c3aed90' }}>📦 {p.what_to_collect}</div>
-                    <div className="text-slate-600 truncate text-[10px]">📍 {p.address_text}</div>
-                    {p.phone && <div className="text-blue-500/60 text-[10px]">📞 {p.phone}</div>}
-                  </div>
+              {route.pickups?.length > 0 && (
+                <div className="text-[9px] font-bold uppercase tracking-wider mb-1.5 px-0.5"
+                  style={{ color: '#a78bfa' }}>
+                  ↩ איסופים ({route.pickups.length})
                 </div>
-              ))}
+              )}
+              {(route.pickups || []).map((p, i) => {
+                const isBeingDragged = dragSrc?.type === 'pickup' && dragSrc?.routeId === route.id && dragSrc?.index === i
+                const isDropTarget = dragOverInfo?.type === 'pickup' && dragOverInfo?.routeId === route.id && dragOverInfo?.index === i
+                return (
+                  <div key={p.id}>
+                    {isDropTarget && (
+                      <div className="h-0.5 rounded-full mx-1 my-0.5 transition-all"
+                        style={{ background: '#a78bfa' }} />
+                    )}
+                    <div
+                      draggable
+                      onDragStart={e => { e.stopPropagation(); onDragStart('pickup', route.id, i) }}
+                      onDragOver={e => onDragOver(e, 'pickup', route.id, i)}
+                      onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop('pickup', route.id, i) }}
+                      onDragEnd={onDragEnd}
+                      className={`
+                        flex items-start gap-2.5 py-1.5 border-b border-white/5 last:border-0
+                        rounded-lg transition-all group
+                        ${isBeingDragged ? 'opacity-30' : 'opacity-100'}
+                        ${dragSrc ? 'cursor-grabbing' : 'cursor-grab hover:bg-white/3'}
+                      `}
+                      style={{ borderColor: '#8b5cf615' }}
+                    >
+                      <div className="text-purple-700 group-hover:text-purple-500 text-xs pt-1 shrink-0 select-none"
+                        style={{ cursor: 'grab' }}>
+                        ⠿
+                      </div>
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0 mt-0.5"
+                        style={{ background: '#8b5cf625', color: '#a78bfa' }}>↩</div>
+                      <div className="flex-1 min-w-0 text-xs">
+                        <div className="font-semibold truncate" style={{ color: '#c4b5fd' }}>{p.name}</div>
+                        <div className="truncate mt-0.5" style={{ color: '#7c3aed90' }}>📦 {p.what_to_collect}</div>
+                        <div className="text-slate-600 truncate text-[10px]">📍 {p.address_text}</div>
+                        {p.phone && <div className="text-blue-500/60 text-[10px]">📞 {p.phone}</div>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              {/* Drop zone for pickups */}
+              {dragSrc && dragSrc.type === 'pickup' && dragSrc.routeId !== route.id && (
+                <div
+                  className="h-6 rounded-lg border border-dashed border-purple-500/30 mt-1 flex items-center justify-center text-[10px] text-purple-400 hover:border-purple-400/50 transition-all"
+                  onDragOver={e => onDragOver(e, 'pickup', route.id, route.pickups.length)}
+                  onDrop={e => { e.preventDefault(); onDrop('pickup', route.id, route.pickups.length) }}
+                >
+                  + הוסף איסוף לקו זה
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -643,51 +725,60 @@ export function MainView() {
 
   // Drag state
   const [dragSrc, setDragSrc] = useState<DragSrc | null>(null)
-  const [dragOver, setDragOver] = useState<{ routeId: number; stopIdx: number } | null>(null)
+  const [dragOver, setDragOver] = useState<{ type: 'stop'|'pickup'; routeId: number; index: number } | null>(null)
 
   // ── Drag handlers ────────────────────────────────────────────────────────────
-  const handleDragStart = useCallback((routeId: number, stopIdx: number) => {
-    setDragSrc({ routeId, stopIdx })
+  const handleDragStart = useCallback((type: 'stop'|'pickup', routeId: number, index: number) => {
+    setDragSrc({ type, routeId, index })
     // Expand both source route and keep open
     setOpenRoute(routeId)
   }, [])
 
-  const handleDragOver = useCallback((e: React.DragEvent, routeId: number, stopIdx: number) => {
+  const handleDragOver = useCallback((e: React.DragEvent, type: 'stop'|'pickup', routeId: number, index: number) => {
     e.preventDefault()
-    setDragOver({ routeId, stopIdx })
+    if (!dragSrc || dragSrc.type !== type) return;
+    setDragOver({ type, routeId, index })
     // Auto-expand route being dragged into
     setOpenRoute(prev => prev === routeId ? prev : routeId)
-  }, [])
+  }, [dragSrc])
 
-  const handleDrop = useCallback((toRouteId: number, toStopIdx: number) => {
-    if (!dragSrc) return
-    const { routeId: fromRouteId, stopIdx: fromIdx } = dragSrc
+  const handleDrop = useCallback((type: 'stop'|'pickup', toRouteId: number, toIndex: number) => {
+    if (!dragSrc || dragSrc.type !== type) return
+    const { routeId: fromRouteId, index: fromIdx } = dragSrc
 
     setResult(prev => {
       if (!prev) return prev
-      if (fromRouteId === toRouteId && fromIdx === toStopIdx) return prev
+      if (fromRouteId === toRouteId && fromIdx === toIndex) return prev
 
-      const routes = prev.routes.map(r => ({ ...r, stops: r.stops.map(s => ({ ...s })) }))
+      const routes = prev.routes.map(r => ({
+        ...r,
+        stops: r.stops.map(s => ({ ...s })),
+        pickups: r.pickups ? r.pickups.map(p => ({ ...p })) : []
+      }))
       const from = routes.find(r => r.id === fromRouteId)
       const to = routes.find(r => r.id === toRouteId)
       if (!from || !to) return prev
 
-      const [stop] = from.stops.splice(fromIdx, 1)
-      // Adjust index if same route (splice shifts items)
-      const adjustedToIdx = fromRouteId === toRouteId && fromIdx < toStopIdx
-        ? toStopIdx - 1
-        : toStopIdx
-      to.stops.splice(Math.max(0, adjustedToIdx), 0, stop)
+      if (type === 'stop') {
+        const [stop] = from.stops.splice(fromIdx, 1)
+        // Adjust index if same route (splice shifts items)
+        const adjustedToIdx = fromRouteId === toRouteId && fromIdx < toIndex ? toIndex - 1 : toIndex
+        to.stops.splice(Math.max(0, adjustedToIdx), 0, stop)
 
-      // Renumber and recalculate
-      from.stops.forEach((s, i) => { s.order = i + 1 })
-      to.stops.forEach((s, i) => { s.order = i + 1 })
-      from.total_carts = from.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
-      to.total_carts = to.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
-      from.distance_km = calcKm(from.stops)
-      to.distance_km = calcKm(to.stops)
+        // Renumber and recalculate
+        from.stops.forEach((s, i) => { s.order = i + 1 })
+        to.stops.forEach((s, i) => { s.order = i + 1 })
+        from.total_carts = from.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+        to.total_carts = to.stops.reduce((a, s) => a + Number(s.carts || 0), 0)
+        from.distance_km = calcKm(from.stops)
+        to.distance_km = calcKm(to.stops)
+      } else {
+        const [pickup] = from.pickups.splice(fromIdx, 1)
+        const adjustedToIdx = fromRouteId === toRouteId && fromIdx < toIndex ? toIndex - 1 : toIndex
+        to.pickups.splice(Math.max(0, adjustedToIdx), 0, pickup)
+      }
 
-      const finalRoutes = routes.filter(r => r.stops.length > 0)
+      const finalRoutes = routes.filter(r => r.stops.length > 0 || (r.pickups && r.pickups.length > 0))
       return {
         ...prev,
         routes: finalRoutes,
