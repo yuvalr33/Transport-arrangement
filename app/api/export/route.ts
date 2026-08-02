@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
         { key: 'packages_h',width: 14},
         { key: 'carts',   width: 8  },
         { key: 'time',    width: 16 },
-        { key: 'notes',   width: 44 },
+        { key: 'notes',   width: 44, alignment: { wrapText: true } },
       ]
 
       // Route title
@@ -181,6 +181,7 @@ export async function POST(req: NextRequest) {
           s.notes || '',
         ])
         row.getCell(8).font = { bold: true } // carts bold
+        row.getCell(10).alignment = { wrapText: true } // wrap text for notes
         row.eachCell({ includeEmpty: true }, c => c.border = borderAll)
       })
 
@@ -239,6 +240,7 @@ export async function POST(req: NextRequest) {
           ])
           ws.mergeCells(`D${row.number}:G${row.number}`)
           row.getCell(8).font = { bold: true }
+          row.getCell(10).alignment = { wrapText: true } // wrap text for pickups notes/phone
           row.eachCell({ includeEmpty: true }, c => c.border = borderAll)
         })
       }
