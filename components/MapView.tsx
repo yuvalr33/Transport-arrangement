@@ -1,7 +1,7 @@
 'use client'
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { GoogleMap, useJsApiLoader, Polyline, OverlayView, Marker, Autocomplete } from '@react-google-maps/api'
-import type { Route, RouteStop } from '@/types'
+import type { Route, RouteStop, RoutePickup } from '@/types'
 
 const HAGLA = { lat: 32.38639, lng: 34.92667 }
 
@@ -9,12 +9,14 @@ const libraries: ("places")[] = ["places"];
 
 export function MapView({
   routes,
-  activeId,
+  activeIds,
   onSelect,
+  showPickupsOnMap = true,
 }: {
   routes: Route[]
-  activeId: number | null
+  activeIds: number[] | null
   onSelect: (id: number) => void
+  showPickupsOnMap?: boolean
 }) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
@@ -131,20 +133,28 @@ export function MapView({
     const bounds = new window.google.maps.LatLngBounds()
     bounds.extend(new window.google.maps.LatLng(HAGLA.lat, HAGLA.lng))
 
-    let hasStops = false
+    let hasPoints = false
     routes.forEach(route => {
       route.stops.forEach(s => {
         if (s.lat && s.lng) {
           bounds.extend(new window.google.maps.LatLng(s.lat, s.lng))
-          hasStops = true
+          hasPoints = true
         }
       })
+      if (showPickupsOnMap && route.pickups) {
+        route.pickups.forEach(p => {
+          if (p.lat && p.lng) {
+            bounds.extend(new window.google.maps.LatLng(p.lat, p.lng))
+            hasPoints = true
+          }
+        })
+      }
     })
 
-    if (hasStops) {
+    if (hasPoints) {
       map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 })
     }
-  }, [map, routes])
+  }, [map, routes, showPickupsOnMap])
 
   // ── Map search ────────────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('')
@@ -234,6 +244,35 @@ export function MapView({
     return Object.values(groups)
   }, [routes])
 
+  // Prepare grouped pickups
+  const groupedPickups = useMemo(() => {
+    const groups: Record<string, { route: Route, pickups: RoutePickup[], first: RoutePickup, key: string }> = {}
+    
+    routes.forEach(route => {
+      if (!route.pickups) return
+      const valid = route.pickups.filter(p => p.lat && p.lng)
+      const locationMap = new Map<string, RoutePickup[]>()
+      
+      for (const pickup of valid) {
+        const key = `${pickup.lat.toFixed(4)},${pickup.lng.toFixed(4)}`
+        if (!locationMap.has(key)) locationMap.set(key, [])
+        locationMap.get(key)!.push(pickup)
+      }
+
+      locationMap.forEach((pickupsAtLoc, locKey) => {
+        const uniqueKey = `route_${route.id}_pickup_loc_${locKey}`
+        groups[uniqueKey] = {
+          route,
+          pickups: pickupsAtLoc,
+          first: pickupsAtLoc[0],
+          key: uniqueKey
+        }
+      })
+    })
+    
+    return Object.values(groups)
+  }, [routes])
+
   if (loadError) return <div className="p-4 text-red-500">Error loading Google Maps</div>
   if (!isLoaded) return <div className="p-4 text-slate-400">Loading Map...</div>
 
@@ -282,7 +321,7 @@ export function MapView({
 
         {/* Polylines for routes */}
         {routes.map(route => {
-          const on = !activeId || route.id === activeId
+          const on = !activeIds || activeIds.includes(route.id)
           const valid = route.stops.filter(s => s.lat && s.lng)
           if (!valid.length) return null
 
@@ -303,18 +342,19 @@ export function MapView({
             <Polyline
               key={`poly_${route.id}`}
               path={pts}
+              visible={on}
               options={{
                 strokeColor: route.color,
-                strokeOpacity: on ? 0.85 : 0.12,
-                strokeWeight: on ? 3.5 : 2,
-                clickable: true,
-                icons: lineSymbol ? [{
+                strokeOpacity: on ? 0.85 : 0,
+                strokeWeight: on ? 3.5 : 0,
+                visible: on,
+                clickable: false,
+                icons: on && lineSymbol ? [{
                   icon: lineSymbol,
                   offset: '0',
                   repeat: '10px'
                 }] : undefined
               }}
-              onClick={() => onSelect(route.id)}
             />
           )
         })}
@@ -322,7 +362,8 @@ export function MapView({
         {/* Markers for stops */}
         {groupedStops.map(group => {
           const { route, stops, first, key } = group
-          const on = !activeId || route.id === activeId
+          const on = !activeIds || activeIds.includes(route.id)
+          if (!on) return null
           
           const multi = stops.length > 1
           const totalCartsSite = stops.reduce((a, s) => a + Number(s.carts), 0)
@@ -336,11 +377,10 @@ export function MapView({
                 mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
               >
                 <div 
-                  onClick={(e) => { e.stopPropagation(); setOpenPopupKey(key); onSelect(route.id); }}
+                  onClick={(e) => { e.stopPropagation(); setOpenPopupKey(key); }}
                   style={{
                     transform: 'translate(-50%, -50%)',
                     position: 'relative', width: `${size}px`, height: `${size}px`,
-                    opacity: on ? 1 : 0.4,
                     cursor: 'pointer'
                   }}
                 >
@@ -398,6 +438,97 @@ export function MapView({
                           </div>
                           {s.notes && <div style={{ background: warn ? 'rgba(239,68,68,.1)' : 'rgba(255,255,255,.04)', borderRadius: '8px', padding: '5px 8px', fontSize: '11px', color: warn ? '#fca5a5' : '#94a3b8' }}>{s.notes}</div>}
                           <div style={{ marginTop: '4px', fontSize: '10px', color: '#475569' }}>{route.name} · עצירה {s.order}</div>
+                        </div>
+                      )
+                    })}
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setOpenPopupKey(null); }}
+                      style={{ position: 'absolute', top: '8px', left: '8px', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '14px' }}
+                    >✕</button>
+                  </div>
+                </OverlayView>
+              )}
+            </div>
+          )
+        })}
+
+        {/* Markers for pickups */}
+        {showPickupsOnMap && groupedPickups.map(group => {
+          const { route, pickups, first, key } = group
+          const on = !activeIds || activeIds.includes(route.id)
+          if (!on) return null
+          
+          const multi = pickups.length > 1
+          const orderLabel = "↩"
+          const size = 26
+
+          return (
+            <div key={key}>
+              <OverlayView
+                position={{ lat: first.lat, lng: first.lng }}
+                mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+              >
+                <div 
+                  onClick={(e) => { e.stopPropagation(); setOpenPopupKey(key); }}
+                  style={{
+                    transform: 'translate(-50%, -50%)',
+                    position: 'relative', width: `${size}px`, height: `${size}px`,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {/* Purple base for pickups with route colored border */}
+                  <div style={{
+                    width: `${size}px`, height: `${size}px`,
+                    background: '#8b5cf6', color: '#fff', borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 800, fontSize: '13px',
+                    border: `2.5px solid ${route.color}`,
+                    boxShadow: '0 2px 10px rgba(139,92,246,.5)',
+                    fontFamily: 'Heebo, sans-serif'
+                  }}>
+                    {orderLabel}
+                  </div>
+                  {multi && (
+                    <div style={{
+                      position: 'absolute', top: '-4px', left: '-4px',
+                      width: '14px', height: '14px', borderRadius: '50%',
+                      background: '#fbbf24', color: '#000',
+                      fontSize: '8px', fontWeight: 900,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: '1.5px solid #000', fontFamily: 'Heebo, sans-serif',
+                      lineHeight: 1
+                    }}>
+                      {pickups.length}
+                    </div>
+                  )}
+                </div>
+              </OverlayView>
+
+              {openPopupKey === key && (
+                <OverlayView
+                  position={{ lat: first.lat, lng: first.lng }}
+                  mapPaneName={OverlayView.FLOAT_PANE}
+                >
+                  <div style={{
+                    transform: 'translate(-50%, -100%)',
+                    marginTop: '-20px',
+                    background: '#0f1d30', border: '1px solid #8b5cf650', borderRadius: '8px',
+                    padding: '12px', color: '#fff', fontFamily: 'Heebo, sans-serif',
+                    boxShadow: '0 4px 16px rgba(139,92,246,0.25)', minWidth: '220px', direction: 'rtl',
+                    zIndex: 1000
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#a78bfa', marginBottom: '6px' }}>📍 {first.address_text}</div>
+                    {multi && <div style={{ fontSize: '11px', fontWeight: 700, color: '#fbbf24', marginBottom: '4px' }}>🏢 {pickups.length} איסופים שונים</div>}
+                    
+                    {pickups.map((p, idx) => {
+                      return (
+                        <div key={idx} style={{ borderTop: idx > 0 ? '1px solid #1e2d45' : 'none', paddingTop: idx > 0 ? '8px' : '0', marginTop: idx > 0 ? '8px' : '0' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 800, color: '#c4b5fd' }}>{p.name}</div>
+                          <div style={{ fontSize: '12px', margin: '4px 0', color: '#e2e8f0' }}>📦 {p.what_to_collect}</div>
+                          {p.carts ? <div style={{ marginBottom: '4px' }}><span style={{ background: 'rgba(139,92,246,.15)', color: '#c4b5fd', padding: '2px 9px', borderRadius: '12px', fontSize: '11px', fontWeight: 700 }}>🛒 {p.carts} עגלות</span></div> : null}
+                          {p.notes && <div style={{ background: 'rgba(255,255,255,.04)', borderRadius: '8px', padding: '5px 8px', fontSize: '11px', color: '#94a3b8' }}>{p.notes}</div>}
+                          {p.phone && <div style={{ marginTop: '4px', fontSize: '11px', color: '#60a5fa' }}>📞 {p.phone}</div>}
+                          <div style={{ marginTop: '6px', fontSize: '10px', color: '#a78bfa80' }}>{route.name} · איסוף</div>
                         </div>
                       )
                     })}

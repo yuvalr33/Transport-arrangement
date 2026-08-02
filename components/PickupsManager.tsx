@@ -384,8 +384,8 @@ function PickupForm({
                         <div className="grid grid-cols-3 gap-3">
                             <div>
                                 <label className="block text-[11px] text-slate-500 mb-1">עגלות</label>
-                                <input className="input text-sm" type="number" step="0.5" min="0" value={form.carts ?? ''}
-                                    onChange={e => set('carts', parseFloat(e.target.value) || '')} placeholder="0" dir="ltr" />
+                                <input className="input text-sm" type="number" step="1" min="0" value={form.carts ?? ''}
+                                    onChange={e => set('carts', parseInt(e.target.value, 10) || '')} placeholder="0" dir="ltr" />
                             </div>
                             <div>
                                 <label className="block text-[11px] text-slate-500 mb-1">טלפון</label>

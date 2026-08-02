@@ -866,12 +866,13 @@ export function MainView() {
   const [error, setError] = useState('')
   const [numTrucks, setNumTrucks] = useState(7)
   const [openRoute, setOpenRoute] = useState<number | null>(null)
-  const [activeRoute, setActiveRoute] = useState<number | null>(null)
+  const [activeRouteIds, setActiveRouteIds] = useState<number[] | null>(null)
   const [exporting, setExporting] = useState(false)
   const [viewMode, setViewMode] = useState<'map' | 'columns'>('map')
   const [showCustomers, setShowCustomers] = useState(false)
   const [showPickups, setShowPickups] = useState(false)
   const [showDrivers, setShowDrivers] = useState(false)
+  const [showPickupsOnMap, setShowPickupsOnMap] = useState(true)
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false)
   const [savedResultToRestore, setSavedResultToRestore] = useState<RoutesResult | null>(null)
   const [drivers, setDrivers] = useState<Driver[]>([])
@@ -1041,7 +1042,7 @@ export function MainView() {
       if (!r.ok) throw new Error(d.error || 'שגיאה')
       setResult(d)
       setReviewRows(null)
-      setOpenRoute(null); setActiveRoute(null)
+      setOpenRoute(null); setActiveRouteIds(null)
       setNumTrucks(trucks)
       setMergeWarnings([])
       setMergeUnassigned([])
@@ -1132,7 +1133,7 @@ export function MainView() {
   const handleFile = useCallback(async (file: File) => {
     // NOTE: do NOT clear result here — we keep it so the user can choose merge vs fresh
     setLoading(true); setError(''); setReviewRows(null)
-    setOpenRoute(null); setActiveRoute(null)
+    setOpenRoute(null); setActiveRouteIds(null)
     const fd = new FormData()
     fd.append('file', file)
     try {
@@ -1332,9 +1333,18 @@ export function MainView() {
 
   const toggle = (id: number) => {
     setOpenRoute(p => p === id ? null : id)
-    setActiveRoute(p => p === id ? null : id)
+    setActiveRouteIds(prev => {
+      if (prev === null) {
+        return [id]
+      }
+      if (prev.includes(id)) {
+        return prev.filter(x => x !== id)
+      } else {
+        return [...prev, id]
+      }
+    })
   }
-  const showAll = () => { setActiveRoute(null); setOpenRoute(null) }
+  const showAll = () => { setActiveRouteIds(null); setOpenRoute(null) }
 
   // ── If in review mode, show ReviewScreen ─────────────────────────────────────
   if (reviewRows) {
@@ -1568,6 +1578,35 @@ export function MainView() {
                     <span>גרור עצירות בין קווים או בתוך קו לשינוי הסדר</span>
                   </div>
                 )}
+
+                {/* Toggle Pickups on Map */}
+                {result && (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/3 border border-white/5 mt-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">📦</span>
+                      <div className="text-right">
+                        <div className="text-xs font-bold text-slate-200">הצג איסופים במפה</div>
+                        <div className="text-[10px] text-slate-500">הצג או הסתר את מיקומי האיסוף המיוחדים</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowPickupsOnMap(!showPickupsOnMap)}
+                      className={`relative h-6 w-11 rounded-full transition-all duration-300 focus:outline-none shrink-0 ${
+                        showPickupsOnMap 
+                          ? 'bg-gradient-to-r from-purple-600 to-indigo-600 shadow-[0_0_10px_rgba(139,92,246,0.3)]' 
+                          : 'bg-slate-800'
+                      }`}
+                      style={{ border: '1px solid rgba(255,255,255,0.08)', direction: 'ltr' }}
+                    >
+                      <span
+                        className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-all duration-300 shadow"
+                        style={{
+                          transform: showPickupsOnMap ? 'translateX(20px)' : 'translateX(0)',
+                        }}
+                      />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Scroll area */}
@@ -1698,7 +1737,7 @@ export function MainView() {
                         key={route.id}
                         route={route}
                         open={openRoute === route.id}
-                        active={activeRoute === route.id}
+                        active={activeRouteIds ? activeRouteIds.includes(route.id) : false}
                         onToggle={() => toggle(route.id)}
                         dragSrc={dragSrc}
                         dragOverInfo={dragOver}
@@ -1730,8 +1769,9 @@ export function MainView() {
             <div className="flex-1 relative">
               <MapView
                 routes={result?.routes ?? []}
-                activeId={activeRoute}
+                activeIds={activeRouteIds}
                 onSelect={toggle}
+                showPickupsOnMap={showPickupsOnMap}
               />
 
               {/* Map legend */}
@@ -1742,24 +1782,31 @@ export function MainView() {
                 >
                   <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-2">קווים</div>
                   <div
-                    className="flex items-center gap-2 cursor-pointer text-slate-400 hover:text-white transition-colors"
+                    className="flex items-center gap-2 cursor-pointer transition-colors"
+                    style={{ 
+                      color: activeRouteIds === null ? '#fff' : '#64748b',
+                      opacity: activeRouteIds === null ? 1 : 0.5 
+                    }}
                     onClick={showAll}
                   >
-                    <div className="w-2 h-2 rounded-full bg-slate-600" />
+                    <div className="w-2 h-2 rounded-full" style={{ background: activeRouteIds === null ? '#10b981' : '#475569' }} />
                     <span>הצג הכל</span>
                   </div>
-                  {result.routes.map(r => (
-                    <div
-                      key={r.id}
-                      onClick={() => toggle(r.id)}
-                      className="flex items-center gap-2 cursor-pointer transition-opacity"
-                      style={{ opacity: activeRoute && activeRoute !== r.id ? 0.3 : 1 }}
-                    >
-                      <div className="w-2 h-2 rounded-full" style={{ background: r.color }} />
-                      <span>{r.name}</span>
-                      <span className="text-slate-500 mr-auto">{r.total_carts}🛒</span>
-                    </div>
-                  ))}
+                  {result.routes.map(r => {
+                    const isSelected = activeRouteIds === null || activeRouteIds.includes(r.id)
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => toggle(r.id)}
+                        className="flex items-center gap-2 cursor-pointer transition-opacity"
+                        style={{ opacity: isSelected ? 1 : 0.35 }}
+                      >
+                        <div className="w-2 h-2 rounded-full" style={{ background: r.color }} />
+                        <span>{r.name}</span>
+                        <span className="text-slate-500 mr-auto">{r.total_carts}🛒</span>
+                      </div>
+                    )
+                  })}
                   <div className="border-t border-border pt-1.5 mt-1 text-[10px] text-slate-600">🏠 מושב חגלה</div>
                 </div>
               )}
